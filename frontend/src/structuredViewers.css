@@ -1,0 +1,162 @@
+.json-structured-view,
+.delimited-table-view {
+  min-width: 100%;
+  min-height: calc(100vh - 210px);
+  color: var(--document-fg);
+  background: var(--document-bg);
+}
+
+.json-structured-view {
+  padding: 18px 22px 48px;
+  font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.json-branch {
+  min-width: max-content;
+}
+
+.json-branch summary {
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.json-branch summary:hover {
+  background: color-mix(in srgb, var(--document-fg) 9%, transparent);
+}
+
+.json-key {
+  color: #7dcfff;
+  font-weight: 650;
+}
+
+.document-theme-github-light .json-key {
+  color: #0550ae;
+}
+
+.json-count {
+  margin-left: 8px;
+  color: var(--document-muted);
+}
+
+.json-leaf {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 14px;
+  min-width: max-content;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.json-value.string { color: #a6e3a1; }
+.json-value.number { color: #f9e2af; }
+.json-value.boolean { color: #cba6f7; }
+.document-theme-github-light .json-value.string { color: #0a7b34; }
+.document-theme-github-light .json-value.number { color: #953800; }
+.document-theme-github-light .json-value.boolean { color: #8250df; }
+
+.structured-error,
+.structured-warning {
+  margin: 16px;
+  padding: 12px 14px;
+  border: 1px solid #c8955e;
+  border-radius: 8px;
+  background: #fff4da;
+  color: #714a1d;
+}
+
+.structured-error {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.delimited-table-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: calc(100vh - 210px);
+}
+
+.table-view-toolbar {
+  position: sticky;
+  top: 42px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--document-border);
+  background: var(--document-header-bg);
+}
+
+.table-view-toolbar input {
+  width: min(360px, 50%);
+  height: 32px;
+  padding: 0 10px;
+  color: var(--document-fg);
+  border: 1px solid var(--document-border);
+  border-radius: 6px;
+  background: var(--document-bg);
+}
+
+.table-view-toolbar span {
+  color: var(--document-muted);
+  font-size: 12px;
+}
+
+.table-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.table-scroll th,
+.table-scroll td {
+  max-width: 420px;
+  padding: 8px 11px;
+  overflow: hidden;
+  border-right: 1px solid var(--document-border);
+  border-bottom: 1px solid var(--document-border);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-scroll th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  background: var(--document-header-bg);
+}
+
+.table-scroll th button {
+  width: 100%;
+  padding: 9px 11px;
+  color: var(--document-header-fg);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-scroll tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--document-fg) 4%, transparent);
+}
+
+.table-scroll tbody tr:hover {
+  background: color-mix(in srgb, var(--document-fg) 9%, transparent);
+}
+
+.table-empty {
+  padding: 32px;
+  color: var(--document-muted);
+  text-align: center;
+}

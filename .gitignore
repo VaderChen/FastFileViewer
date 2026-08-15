@@ -1,0 +1,34 @@
+# macOS、編輯器與本機暫存
+.DS_Store
+._*
+*.bak
+.idea/
+.vscode/
+.codex-tmp/
+
+# 本機設定與敏感資料
+.env
+.env.*
+/cert/
+/data/
+*.p12
+*.key
+*.cer
+*.provisionprofile
+*.mobileprovision
+
+# 建置與發行產物
+/build/bin/
+/build/tools/
+/dist/
+/frontend/dist/
+/frontend/node_modules
+/THIRD-PARTY-LICENSES.txt
+/build-metadata.json
+*.app
+*.dmg
+*.pkg
+*.zip
+
+# 本機工具快取
+/frontend/package.json.md5
