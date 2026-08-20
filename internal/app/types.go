@@ -4,6 +4,7 @@ type BootstrapPayload struct {
 	DefaultPath        string   `json:"defaultPath"`
 	SupportedImages    []string `json:"supportedImages"`
 	SupportedDocuments []string `json:"supportedDocuments"`
+	SupportedMedia     []string `json:"supportedMedia"`
 	SupportedPacks     []string `json:"supportedPacks"`
 }
 

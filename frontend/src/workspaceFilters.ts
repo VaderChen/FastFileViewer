@@ -1,6 +1,6 @@
 import type { ImageEntry } from './types';
 
-export type WorkspaceKindFilter = 'all' | 'image' | 'document';
+export type WorkspaceKindFilter = 'all' | 'image' | 'document' | 'media';
 export type WorkspaceSourceFilter = 'all' | 'file' | 'archive';
 
 export function filterWorkspaceEntries(
@@ -14,7 +14,10 @@ export function filterWorkspaceEntries(
     if (kindFilter === 'image' && entry.kind !== 'image') {
       return false;
     }
-    if (kindFilter === 'document' && entry.kind === 'image') {
+    if (kindFilter === 'document' && (entry.kind === 'image' || isMediaKindValue(entry.kind))) {
+      return false;
+    }
+    if (kindFilter === 'media' && !isMediaKindValue(entry.kind)) {
       return false;
     }
     if (sourceFilter !== 'all' && entry.source !== sourceFilter) {
@@ -26,4 +29,8 @@ export function filterWorkspaceEntries(
     return [entry.name, entry.path, entry.directoryPath, entry.format]
       .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
   });
+}
+
+function isMediaKindValue(kind: ImageEntry['kind']): boolean {
+  return kind === 'video' || kind === 'audio' || kind === 'subtitle';
 }

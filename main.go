@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 
@@ -23,10 +24,13 @@ func main() {
 		Height:           920,
 		MinWidth:         960,
 		MinHeight:        560,
-		AssetServer:      &assetserver.Options{Assets: assets},
+		AssetServer:      &assetserver.Options{Assets: assets, Middleware: app.NewMediaMiddleware(application)},
 		DragAndDrop:      &options.DragAndDrop{EnableFileDrop: true},
 		BackgroundColour: &options.RGBA{R: 242, G: 244, B: 241, A: 1},
 		OnStartup:        application.Startup,
+		OnShutdown: func(context.Context) {
+			app.CleanupMediaCache(application)
+		},
 		Bind: []interface{}{
 			application,
 		},

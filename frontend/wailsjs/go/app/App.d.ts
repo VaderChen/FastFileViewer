@@ -28,12 +28,14 @@ export function LoadImageByPathWithOperation(arg1:string,arg2:number):Promise<ap
 
 export function LoadLibraryCache(arg1:string):Promise<string>;
 
+export function PrepareMediaByPath(arg1:string):Promise<string>;
+
 export function LoadThumbnailByPath(arg1:string,arg2:number):Promise<app.ImagePayload>;
 
 export function ResetLibrary():Promise<void>;
 
 export function SaveLibraryCache(arg1:string,arg2:string):Promise<void>;
 
-export function ScanDirectory(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:number):Promise<app.DirectoryScanResult>;
+export function ScanDirectory(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:number):Promise<app.DirectoryScanResult>;
 
 export function SelectDirectory(arg1:string):Promise<string>;

@@ -1,18 +1,20 @@
 export type NodeKind = 'directory' | 'archive';
 export type ImageSource = 'file' | 'archive';
-export type EntryKind = 'image' | 'text' | 'markdown' | 'code';
+export type EntryKind = 'image' | 'text' | 'markdown' | 'code' | 'video' | 'audio' | 'subtitle';
+export type MediaEntryKind = 'video' | 'audio' | 'subtitle';
 export type ViewerMode = 'fit' | 'actual';
 export type ZoomBehavior = 'fitArea' | 'shrinkLarge' | 'lockRatio';
 export type LocaleCode = 'zh-TW' | 'en' | 'ja';
 export type LanguagePreference = 'auto' | LocaleCode;
 export type StageBackground = 'lightGray' | 'white' | 'darkGray' | 'black' | 'checker';
 export type DocumentTheme = 'github-dark' | 'github-light' | 'atom-one-dark' | 'nord' | 'monokai';
-export type SettingsTab = 'display' | 'imageFormats' | 'documentFormats' | 'about';
+export type SettingsTab = 'display' | 'imageFormats' | 'documentFormats' | 'mediaFormats' | 'about';
 
 export interface BootstrapPayload {
   defaultPath: string;
   supportedImages: string[];
   supportedDocuments: string[];
+  supportedMedia: string[];
   supportedPacks: string[];
 }
 
@@ -84,4 +86,12 @@ export interface AppInfo {
   buildState: string;
   sourceUrl: string;
   license: string;
+}
+
+export function isMediaKind(kind: EntryKind): kind is MediaEntryKind {
+  return kind === 'video' || kind === 'audio' || kind === 'subtitle';
+}
+
+export function isPlaybackMediaKind(kind: EntryKind): kind is 'video' | 'audio' {
+  return kind === 'video' || kind === 'audio';
 }

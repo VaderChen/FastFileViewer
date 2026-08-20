@@ -160,6 +160,12 @@ var supportedDocumentExtensions = []string{
 	".tsv",
 }
 
+var supportedMediaExtensions = []string{
+	".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".m2ts",
+	".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".oga", ".opus",
+	".srt", ".vtt", ".ass", ".ssa", ".sub", ".smi",
+}
+
 var supportedArchiveExtensions = []string{
 	".zip",
 	".tar",
@@ -171,6 +177,9 @@ type App struct {
 	ctx             context.Context
 	imageMu         sync.Mutex
 	lastImages      map[string]ImageEntry
+	mediaCacheMu    sync.Mutex
+	mediaCacheDir   string
+	mediaCacheFiles map[string]string
 	thumbnailOnce   sync.Once
 	libraryCacheMu  sync.Mutex
 	operationMu     sync.Mutex
@@ -185,8 +194,9 @@ type operationState struct {
 
 func New() *App {
 	return &App{
-		lastImages: make(map[string]ImageEntry),
-		operations: make(map[int64]operationState),
+		lastImages:      make(map[string]ImageEntry),
+		mediaCacheFiles: make(map[string]string),
+		operations:      make(map[int64]operationState),
 	}
 }
 
@@ -247,6 +257,7 @@ func (a *App) Bootstrap() BootstrapPayload {
 		DefaultPath:        home,
 		SupportedImages:    append([]string{}, supportedImageExtensions...),
 		SupportedDocuments: append([]string{}, supportedDocumentExtensions...),
+		SupportedMedia:     append([]string{}, supportedMediaExtensions...),
 		SupportedPacks:     append([]string{}, supportedArchiveExtensions...),
 	}
 }
@@ -418,7 +429,7 @@ func (a *App) LoadDocumentByPath(filePath string) (DocumentPayload, error) {
 	if err != nil {
 		return DocumentPayload{}, err
 	}
-	if entry.Kind == "image" {
+	if entry.Kind == "image" || entry.Kind == "video" || entry.Kind == "audio" {
 		return DocumentPayload{}, fmt.Errorf("不是支援的文字文件: %s", entry.Name)
 	}
 
@@ -534,11 +545,12 @@ func (a *App) CalculateChecksum(entry ImageEntry, operationID int64) (string, er
 
 func (a *App) ResetLibrary() {
 	a.imageMu.Lock()
-	defer a.imageMu.Unlock()
 	a.lastImages = make(map[string]ImageEntry)
+	a.imageMu.Unlock()
+	a.cleanupMediaCache()
 }
 
-func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []string, enabledDocumentExtensions []string, operationID int64) (DirectoryScanResult, error) {
+func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []string, enabledDocumentExtensions []string, enabledMediaExtensions []string, operationID int64) (DirectoryScanResult, error) {
 	operationCtx := a.operationContext(operationID)
 	if err := checkOperation(operationCtx); err != nil {
 		return DirectoryScanResult{}, err
@@ -549,6 +561,7 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 	}
 	imageExtensionFilter := newExtensionFilter(enabledImageExtensions, supportedImageExtensions)
 	documentExtensionFilter := newExtensionFilter(enabledDocumentExtensions, supportedDocumentExtensions)
+	mediaExtensionFilter := newExtensionFilter(enabledMediaExtensions, supportedMediaExtensions)
 
 	absPath, err := filepath.Abs(directoryPath)
 	if err != nil {
@@ -597,14 +610,14 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 		}
 
 		extension := normalizedExtension(childPath)
-		if isEnabledExtension(extension, imageExtensionFilter) || isEnabledExtension(extension, documentExtensionFilter) {
+		if isEnabledExtension(extension, imageExtensionFilter) || isEnabledExtension(extension, documentExtensionFilter) || isEnabledExtension(extension, mediaExtensionFilter) {
 			image := buildFileImageEntry(childPath, info.Size())
 			node.Images = append(node.Images, image)
 			a.rememberImage(image)
 			continue
 		}
 		if isSupportedArchive(extension) {
-			archiveNode, err := a.scanArchiveNode(operationCtx, childPath, imageExtensionFilter, documentExtensionFilter)
+			archiveNode, err := a.scanArchiveNode(operationCtx, childPath, imageExtensionFilter, documentExtensionFilter, mediaExtensionFilter)
 			if errors.Is(err, errOperationCancelled) {
 				return DirectoryScanResult{}, err
 			}
@@ -877,14 +890,14 @@ func buildArchiveImageEntry(archivePath string, innerPath string, size int64) Im
 	}
 }
 
-func (a *App) scanArchiveNode(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool) (LibraryNode, error) {
+func (a *App) scanArchiveNode(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool, mediaExtensionFilter map[string]bool) (LibraryNode, error) {
 	archiveNode := buildArchiveNode(archivePath)
 	var images []ImageEntry
 	var err error
 	if normalizedExtension(archivePath) == ".zip" {
-		images, err = scanZipArchiveImages(operationCtx, archivePath, imageExtensionFilter, documentExtensionFilter)
+		images, err = scanZipArchiveImages(operationCtx, archivePath, imageExtensionFilter, documentExtensionFilter, mediaExtensionFilter)
 	} else {
-		images, err = scanTarArchiveImages(operationCtx, archivePath, imageExtensionFilter, documentExtensionFilter)
+		images, err = scanTarArchiveImages(operationCtx, archivePath, imageExtensionFilter, documentExtensionFilter, mediaExtensionFilter)
 	}
 	if err != nil {
 		return archiveNode, err
@@ -897,7 +910,7 @@ func (a *App) scanArchiveNode(operationCtx context.Context, archivePath string, 
 	return archiveNode, nil
 }
 
-func scanZipArchiveImages(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool) ([]ImageEntry, error) {
+func scanZipArchiveImages(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool, mediaExtensionFilter map[string]bool) ([]ImageEntry, error) {
 	reader, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return nil, err
@@ -917,7 +930,7 @@ func scanZipArchiveImages(operationCtx context.Context, archivePath string, imag
 			continue
 		}
 		extension := normalizedArchiveExtension(entryName)
-		if !isEnabledExtension(extension, imageExtensionFilter) && !isEnabledExtension(extension, documentExtensionFilter) {
+		if !isEnabledExtension(extension, imageExtensionFilter) && !isEnabledExtension(extension, documentExtensionFilter) && !isEnabledExtension(extension, mediaExtensionFilter) {
 			continue
 		}
 		images = append(images, buildArchiveImageEntry(archivePath, entryName, int64(file.UncompressedSize64)))
@@ -925,7 +938,7 @@ func scanZipArchiveImages(operationCtx context.Context, archivePath string, imag
 	return images, nil
 }
 
-func scanTarArchiveImages(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool) ([]ImageEntry, error) {
+func scanTarArchiveImages(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool, mediaExtensionFilter map[string]bool) ([]ImageEntry, error) {
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return nil, err
@@ -961,7 +974,7 @@ func scanTarArchiveImages(operationCtx context.Context, archivePath string, imag
 			continue
 		}
 		extension := normalizedArchiveExtension(entryName)
-		if !isEnabledExtension(extension, imageExtensionFilter) && !isEnabledExtension(extension, documentExtensionFilter) {
+		if !isEnabledExtension(extension, imageExtensionFilter) && !isEnabledExtension(extension, documentExtensionFilter) && !isEnabledExtension(extension, mediaExtensionFilter) {
 			continue
 		}
 		images = append(images, buildArchiveImageEntry(archivePath, entryName, header.Size))
@@ -1439,10 +1452,37 @@ func entryKind(extension string) string {
 	if extension == ".txt" {
 		return "text"
 	}
+	if isSupportedMedia(extension) {
+		if isSubtitleExtension(extension) {
+			return "subtitle"
+		}
+		if isVideoExtension(extension) {
+			return "video"
+		}
+		return "audio"
+	}
 	if isSupportedDocument(extension) {
 		return "code"
 	}
 	return "image"
+}
+
+func isSubtitleExtension(extension string) bool {
+	switch extension {
+	case ".srt", ".vtt", ".ass", ".ssa", ".sub", ".smi":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoExtension(extension string) bool {
+	switch extension {
+	case ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".m2ts":
+		return true
+	default:
+		return false
+	}
 }
 
 func isSupportedDocument(extension string) bool {
@@ -1455,7 +1495,16 @@ func isSupportedDocument(extension string) bool {
 }
 
 func isSupportedEntry(extension string) bool {
-	return isSupportedImage(extension) || isSupportedDocument(extension)
+	return isSupportedImage(extension) || isSupportedDocument(extension) || isSupportedMedia(extension)
+}
+
+func isSupportedMedia(extension string) bool {
+	for _, supported := range supportedMediaExtensions {
+		if extension == supported {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeDocumentText(data []byte) string {
@@ -1472,7 +1521,8 @@ func decodeDocumentText(data []byte) string {
 	bestText := string(data)
 	bestScore := scoreDecodedDocument(bestText) - 100
 	for _, candidate := range []encodingCandidate{
-		{encoding: traditionalchinese.Big5, bias: 3},
+		{encoding: simplifiedchinese.GB18030, bias: 3},
+		{encoding: traditionalchinese.Big5, bias: 2},
 		{encoding: japanese.ShiftJIS},
 		{encoding: charmap.Windows1252, bias: -5},
 	} {
@@ -1708,6 +1758,36 @@ func mimeByExtension(extension string) string {
 		return "image/tiff"
 	case ".heic":
 		return "image/heic"
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	case ".webm":
+		return "video/webm"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".avi":
+		return "video/x-msvideo"
+	case ".m2ts":
+		return "video/mp2t"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a":
+		return "audio/mp4"
+	case ".wav":
+		return "audio/wav"
+	case ".aac":
+		return "audio/aac"
+	case ".flac":
+		return "audio/flac"
+	case ".ogg", ".oga":
+		return "audio/ogg"
+	case ".opus":
+		return "audio/opus"
+	case ".vtt":
+		return "text/vtt"
+	case ".srt", ".ass", ".ssa", ".sub", ".smi":
+		return "text/plain"
 	default:
 		return "application/octet-stream"
 	}

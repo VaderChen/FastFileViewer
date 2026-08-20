@@ -12,10 +12,13 @@
 
 ## Features
 
-- Incrementally scan local folders into a unified tree of images, documents, and source code.
+- Incrementally scan local folders into a unified tree of images, documents, source code, media, and subtitles.
 - Browse supported content inside ZIP, TAR, TGZ, and TAR.GZ archives without extracting them.
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
 - Render Markdown, syntax-highlight code, browse JSON trees, and search or sort CSV/TSV tables.
+- Play common video and audio formats with seeking, volume, fullscreen, and keyboard controls.
+- Automatically attach matching VTT, SRT, ASS, SSA, SMI, and text-based SUB sidecar subtitles.
+- Configure image, document, media, and subtitle scan formats independently.
 - Use a three-pane workspace with persistent pinned folders, batch loading, and cancellable operations.
 - Export selections across folders and archives, calculate SHA-256, and detect byte-identical duplicates.
 - Persist library indexes, thumbnails, and adjacent-image caches locally without a network service.
@@ -23,9 +26,7 @@
 
 ## Open Source Edition
 
-The public source edition does not use StoreKit or App Sandbox and does not include Apple certificates, provisioning profiles, private keys, App Store packages, or notarization workflows. It can access files already available to the current user account, while macOS may still request access to privacy-protected locations.
-
-Public builds use ad-hoc signing by default and are intended for local builds and verification. Developer ID signing, notarization, DMG creation, and release packaging remain the distributor's responsibility.
+The public source edition does not use StoreKit or App Sandbox and does not contain local release credentials or machine-specific settings. It can access files already available to the current user account, while macOS may still request access to privacy-protected locations.
 
 ## Requirements
 
@@ -53,13 +54,7 @@ The development script mirrors the project into a local temporary directory to a
 
 The output is `build/bin/FastFileViewer.app`. The build runs Go and frontend verification and bundles GPLv3, complete third-party license texts, notices, and traceable Git build metadata under `Contents/Resources`.
 
-To use an installed Developer ID identity:
-
-```bash
-CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
-```
-
-This does not notarize the application.
+Prebuilt downloads and SHA-256 checksum files are available from [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases).
 
 ## Privacy and Security
 

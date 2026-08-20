@@ -5,11 +5,11 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import hljs from 'highlight.js/lib/common';
 import 'github-markdown-css/github-markdown.css';
-import githubDarkThemeUrl from 'highlight.js/styles/github-dark.css?url';
-import githubLightThemeUrl from 'highlight.js/styles/github.css?url';
-import atomOneDarkThemeUrl from 'highlight.js/styles/atom-one-dark.css?url';
-import nordThemeUrl from 'highlight.js/styles/nord.css?url';
-import monokaiThemeUrl from 'highlight.js/styles/monokai.css?url';
+import githubDarkThemeCSS from 'highlight.js/styles/github-dark.css?inline';
+import githubLightThemeCSS from 'highlight.js/styles/github.css?inline';
+import atomOneDarkThemeCSS from 'highlight.js/styles/atom-one-dark.css?inline';
+import nordThemeCSS from 'highlight.js/styles/nord.css?inline';
+import monokaiThemeCSS from 'highlight.js/styles/monokai.css?inline';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faAngleDown,
@@ -38,16 +38,20 @@ import {
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { ClipboardSetText, WindowFullscreen, WindowIsFullscreen, WindowSetTitle, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
+import { isMediaKind, isPlaybackMediaKind } from './types';
 import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DuplicateGroup, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ViewerMode, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
 import { filterWorkspaceEntries } from './workspaceFilters';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
+import { MediaPlayer } from './MediaPlayer';
+import { findSidecarSubtitle } from './mediaSupport';
 
 const fallbackBootstrap: BootstrapPayload = {
   defaultPath: '',
   supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic'],
   supportedDocuments: ['.txt', '.md', '.markdown'],
+  supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
   supportedPacks: ['.zip', '.tar', '.tgz', '.tar.gz'],
 };
 
@@ -66,13 +70,15 @@ const messages = {
   'zh-TW': {
     appName: '檔案工作台',
     documentCount: '份文件',
+    mediaCount: '個媒體',
     contentCount: '個項目',
     loadingDocument: '讀取文件中',
     markdownPreview: 'Markdown 預覽',
     textPreview: '純文字預覽',
+    subtitlePreview: '字幕預覽',
     codePreview: '程式碼預覽',
     workspace: '內容工作區',
-    workspaceSubtitle: '跨資料夾與壓縮檔瀏覽圖片、文件及程式碼',
+    workspaceSubtitle: '跨資料夾與壓縮檔瀏覽圖片、文件、媒體及程式碼',
     selectedCount: '已選取',
     exportSelected: '匯出選取項目',
     exportDestination: '選擇匯出目錄',
@@ -104,7 +110,19 @@ const messages = {
     fullscreen: '全螢幕',
     exitFullscreen: '離開全螢幕',
     loadingImage: '讀取內容中',
-    pickImage: '請從左側選擇圖片或文件',
+    pickImage: '請從左側選擇圖片、文件或媒體',
+    loadingMedia: '準備影音播放中',
+    mediaPlaybackFailed: '無法播放此影音，可能是系統不支援該編碼格式',
+    subtitleFailed: '字幕格式無法轉換或載入',
+    mediaPlay: '播放',
+    mediaPause: '暫停',
+    mediaBackward: '倒退 10 秒',
+    mediaForward: '快轉 10 秒',
+    mediaMute: '靜音',
+    mediaUnmute: '取消靜音',
+    mediaSubtitlesOn: '開啟字幕',
+    mediaSubtitlesOff: '關閉字幕',
+    mediaSeek: '播放進度',
     noImage: '未選擇內容',
     selectPathFirst: '請先選擇或輸入圖片目錄',
     operationFailed: '操作失敗',
@@ -124,6 +142,7 @@ const messages = {
     allContent: '全部類型',
     imagesOnly: '只看圖片',
     documentsOnly: '只看文件',
+    mediaOnly: '只看媒體',
     allSources: '全部來源',
     foldersOnly: '資料夾',
     archivesOnly: '壓縮檔',
@@ -157,6 +176,7 @@ const messages = {
     formats: '檔案格式',
     imageFormats: '影像檔案',
     documentFormats: '文件檔案',
+    mediaFormats: '媒體與字幕',
     clearAll: '全不選',
     about: '關於',
     zoomBehavior: '縮放',
@@ -186,13 +206,15 @@ const messages = {
   en: {
     appName: 'FastFileViewer',
     documentCount: 'documents',
+    mediaCount: 'media',
     contentCount: 'items',
     loadingDocument: 'Loading document',
     markdownPreview: 'Markdown preview',
     textPreview: 'Plain text preview',
+    subtitlePreview: 'Subtitle preview',
     codePreview: 'Code preview',
     workspace: 'Content Workspace',
-    workspaceSubtitle: 'Browse images, documents, and source code across folders and archives',
+    workspaceSubtitle: 'Browse images, documents, media, and source code across folders and archives',
     selectedCount: 'Selected',
     exportSelected: 'Export selected items',
     exportDestination: 'Choose export folder',
@@ -224,7 +246,19 @@ const messages = {
     fullscreen: 'Fullscreen',
     exitFullscreen: 'Exit fullscreen',
     loadingImage: 'Loading content',
-    pickImage: 'Choose an image or document on the left',
+    pickImage: 'Choose an image, document, or media item on the left',
+    loadingMedia: 'Preparing media playback',
+    mediaPlaybackFailed: 'Unable to play this media. Its codec may not be supported by the system.',
+    subtitleFailed: 'Unable to convert or load the subtitle',
+    mediaPlay: 'Play',
+    mediaPause: 'Pause',
+    mediaBackward: 'Back 10 seconds',
+    mediaForward: 'Forward 10 seconds',
+    mediaMute: 'Mute',
+    mediaUnmute: 'Unmute',
+    mediaSubtitlesOn: 'Turn subtitles on',
+    mediaSubtitlesOff: 'Turn subtitles off',
+    mediaSeek: 'Playback position',
     noImage: 'No content selected',
     selectPathFirst: 'Choose or enter a folder first',
     operationFailed: 'Operation failed',
@@ -244,6 +278,7 @@ const messages = {
     allContent: 'All types',
     imagesOnly: 'Images only',
     documentsOnly: 'Documents only',
+    mediaOnly: 'Media only',
     allSources: 'All sources',
     foldersOnly: 'Folders',
     archivesOnly: 'Archives',
@@ -277,6 +312,7 @@ const messages = {
     formats: 'File Formats',
     imageFormats: 'Images',
     documentFormats: 'Documents',
+    mediaFormats: 'Media & Subtitles',
     clearAll: 'Clear all',
     about: 'About',
     zoomBehavior: 'Zoom',
@@ -306,13 +342,15 @@ const messages = {
   ja: {
     appName: 'ファイルデスク',
     documentCount: '件の文書',
+    mediaCount: '件のメディア',
     contentCount: '項目',
     loadingDocument: '文書を読み込み中',
     markdownPreview: 'Markdown プレビュー',
     textPreview: 'テキストプレビュー',
+    subtitlePreview: '字幕プレビュー',
     codePreview: 'コードプレビュー',
     workspace: 'コンテンツワークスペース',
-    workspaceSubtitle: 'フォルダと圧縮ファイル内の画像・文書・コードを閲覧',
+    workspaceSubtitle: 'フォルダと圧縮ファイル内の画像・文書・メディア・コードを閲覧',
     selectedCount: '選択済み',
     exportSelected: '選択項目を書き出す',
     exportDestination: '書き出し先を選択',
@@ -344,7 +382,19 @@ const messages = {
     fullscreen: '全画面',
     exitFullscreen: '全画面を終了',
     loadingImage: 'コンテンツを読み込み中',
-    pickImage: '左側で画像または文書を選択してください',
+    pickImage: '左側で画像、文書、またはメディアを選択してください',
+    loadingMedia: 'メディアを準備中',
+    mediaPlaybackFailed: 'このメディアを再生できません。システムがコーデックに対応していない可能性があります。',
+    subtitleFailed: '字幕を変換または読み込みできません',
+    mediaPlay: '再生',
+    mediaPause: '一時停止',
+    mediaBackward: '10 秒戻る',
+    mediaForward: '10 秒進む',
+    mediaMute: 'ミュート',
+    mediaUnmute: 'ミュート解除',
+    mediaSubtitlesOn: '字幕をオン',
+    mediaSubtitlesOff: '字幕をオフ',
+    mediaSeek: '再生位置',
     noImage: 'コンテンツ未選択',
     selectPathFirst: '先にフォルダを選択または入力してください',
     operationFailed: '操作に失敗しました',
@@ -364,6 +414,7 @@ const messages = {
     allContent: 'すべての種類',
     imagesOnly: '画像のみ',
     documentsOnly: '文書のみ',
+    mediaOnly: 'メディアのみ',
     allSources: 'すべてのソース',
     foldersOnly: 'フォルダ',
     archivesOnly: '圧縮ファイル',
@@ -397,6 +448,7 @@ const messages = {
     formats: 'ファイル形式',
     imageFormats: '画像ファイル',
     documentFormats: '文書ファイル',
+    mediaFormats: 'メディア・字幕',
     clearAll: 'すべて解除',
     about: '情報',
     zoomBehavior: 'ズーム',
@@ -454,12 +506,12 @@ const documentThemeOptions: Array<{ value: DocumentTheme; label: string }> = [
   { value: 'monokai', label: 'Monokai' },
 ];
 
-const documentThemeUrls: Record<DocumentTheme, string> = {
-  'github-dark': githubDarkThemeUrl,
-  'github-light': githubLightThemeUrl,
-  'atom-one-dark': atomOneDarkThemeUrl,
-  nord: nordThemeUrl,
-  monokai: monokaiThemeUrl,
+const documentThemeStyles: Record<DocumentTheme, string> = {
+  'github-dark': githubDarkThemeCSS,
+  'github-light': githubLightThemeCSS,
+  'atom-one-dark': atomOneDarkThemeCSS,
+  nord: nordThemeCSS,
+  monokai: monokaiThemeCSS,
 };
 
 const workspacePageSize = 120;
@@ -478,6 +530,7 @@ const storageKeys = {
   documentTheme: 'fastfileviewer.documentTheme',
   enabledImageExtensions: 'fastfileviewer.enabledImageExtensions',
   enabledDocumentExtensions: 'fastfileviewer.enabledDocumentExtensions.v2',
+  enabledMediaExtensions: 'fastfileviewer.enabledMediaExtensions.v1',
   rootPath: 'fastfileviewer.rootPath',
   libraryCache: 'fastfileviewer.libraryCache.v3',
   librarySelection: 'fastfileviewer.librarySelection.v1',
@@ -519,12 +572,14 @@ export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload>(fallbackBootstrap);
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const [documentFormatsReady, setDocumentFormatsReady] = useState(false);
+  const [mediaFormatsReady, setMediaFormatsReady] = useState(false);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => resolveInitialLanguagePreference());
   const [stageBackground, setStageBackground] = useState<StageBackground>(() => resolveInitialStageBackground());
   const [zoomBehavior, setZoomBehavior] = useState<ZoomBehavior>(() => resolveInitialZoomBehavior());
   const [documentTheme, setDocumentTheme] = useState<DocumentTheme>(() => resolveInitialDocumentTheme());
   const [enabledImageExtensions, setEnabledImageExtensions] = useState<string[]>(() => resolveInitialEnabledImageExtensions());
   const [enabledDocumentExtensions, setEnabledDocumentExtensions] = useState<string[]>(() => resolveInitialEnabledDocumentExtensions());
+  const [enabledMediaExtensions, setEnabledMediaExtensions] = useState<string[]>(() => resolveInitialEnabledMediaExtensions());
   const locale = useMemo(() => resolveLocale(languagePreference), [languagePreference]);
   const [rootPath, setRootPath] = useState('');
   const [tree, setTree] = useState<LibraryNode | null>(null);
@@ -615,14 +670,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(storageKeys.documentTheme, documentTheme);
     const elementId = 'fastfileviewer-highlight-theme';
-    let themeLink = document.getElementById(elementId) as HTMLLinkElement | null;
-    if (!themeLink) {
-      themeLink = document.createElement('link');
-      themeLink.id = elementId;
-      themeLink.rel = 'stylesheet';
-      document.head.appendChild(themeLink);
+    let themeStyle = document.getElementById(elementId) as HTMLStyleElement | null;
+    if (themeStyle && themeStyle.tagName !== 'STYLE') {
+      themeStyle.remove();
+      themeStyle = null;
     }
-    themeLink.href = documentThemeUrls[documentTheme];
+    if (!themeStyle) {
+      themeStyle = document.createElement('style');
+      themeStyle.id = elementId;
+      document.head.appendChild(themeStyle);
+    }
+    themeStyle.textContent = documentThemeStyles[documentTheme];
   }, [documentTheme]);
 
   useEffect(() => {
@@ -656,6 +714,13 @@ export default function App() {
   }, [documentFormatsReady, enabledDocumentExtensions]);
 
   useEffect(() => {
+    if (!mediaFormatsReady) {
+      return;
+    }
+    localStorage.setItem(storageKeys.enabledMediaExtensions, JSON.stringify(enabledMediaExtensions));
+  }, [enabledMediaExtensions, mediaFormatsReady]);
+
+  useEffect(() => {
     if (!bootstrapReady) {
       return;
     }
@@ -667,11 +732,15 @@ export default function App() {
   useEffect(() => {
     void window.go?.app?.App?.Bootstrap?.()
       .then(async (payload) => {
+        const supportedMedia = payload.supportedMedia?.length ? payload.supportedMedia : fallbackBootstrap.supportedMedia;
         const storedDocuments = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, payload.supportedDocuments);
-        setBootstrap(payload);
+        const storedMedia = readStoredEnabledExtensions(storageKeys.enabledMediaExtensions, supportedMedia);
+        setBootstrap({ ...payload, supportedMedia });
         setEnabledDocumentExtensions(storedDocuments ?? [...payload.supportedDocuments]);
+        setEnabledMediaExtensions(storedMedia ?? [...supportedMedia]);
         setBootstrapReady(true);
         setDocumentFormatsReady(true);
+        setMediaFormatsReady(true);
         const persistedRootPath = readPersistedRootPath();
         const initialRootPath = persistedRootPath || payload.defaultPath;
         setRootPath(initialRootPath);
@@ -847,6 +916,16 @@ export default function App() {
       setZoom(1);
     }
     setImageNaturalSize({ width: 0, height: 0 });
+
+    if (selectedImageEntry && isPlaybackMediaKind(selectedImageEntry.kind)) {
+      setImagePayload(null);
+      setDocumentPayload(null);
+      setErrorMessage('');
+      setLoadingImage(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (selectedImageEntry && selectedImageEntry.kind !== 'image') {
       setImagePayload(null);
@@ -1128,7 +1207,7 @@ export default function App() {
       operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
       scanOperationRef.current = operationId;
       await window.go?.app?.App?.ResetLibrary?.();
-      const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, enabledDocumentExtensions, operationId);
+      const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, enabledDocumentExtensions, enabledMediaExtensions, operationId);
       if (!firstResult?.node || scanTokenRef.current !== token) {
         return;
       }
@@ -1156,7 +1235,7 @@ export default function App() {
         setPendingDirectories(queue.length + 1);
 
         try {
-          const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, enabledDocumentExtensions, operationId);
+          const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, enabledDocumentExtensions, enabledMediaExtensions, operationId);
           if (!result?.node || scanTokenRef.current !== token) {
             return;
           }
@@ -1488,6 +1567,16 @@ export default function App() {
     });
   };
 
+  const toggleMediaExtension = (extension: string) => {
+    setEnabledMediaExtensions((current) => {
+      const normalized = normalizeExtension(extension);
+      if (current.includes(normalized)) {
+        return current.filter((item) => item !== normalized);
+      }
+      return normalizeEnabledExtensions([...current, normalized], bootstrap.supportedMedia);
+    });
+  };
+
   const handleZoomBehaviorChange = (nextZoomBehavior: ZoomBehavior) => {
     setZoomBehavior(nextZoomBehavior);
     if (nextZoomBehavior === 'lockRatio') {
@@ -1665,8 +1754,15 @@ export default function App() {
 
   const activeImage = selectedImageEntry;
   const activeIsImage = activeImage?.kind === 'image';
+  const activeIsSubtitle = activeImage?.kind === 'subtitle';
+  const activeIsMedia = activeImage ? isPlaybackMediaKind(activeImage.kind) : false;
+  const activeSubtitle = useMemo(
+    () => activeImage && activeImage.kind === 'video' ? findSidecarSubtitle(activeImage, allLibraryImages) : null,
+    [activeImage, allLibraryImages],
+  );
   const totalImages = allLibraryImages.filter((entry) => entry.kind === 'image').length;
-  const totalDocuments = allLibraryImages.filter((entry) => entry.kind !== 'image').length;
+  const totalDocuments = allLibraryImages.filter((entry) => entry.kind !== 'image' && !isMediaKind(entry.kind)).length;
+  const totalMedia = allLibraryImages.filter((entry) => isMediaKind(entry.kind)).length;
   const totalArchives = displayTree ? countArchives(displayTree) : 0;
   const imageDisplayStyle = buildImageDisplayStyle(viewerMode, zoomBehavior, imageNaturalSize, stageSize, zoom, rotation);
   const displayZoom = viewerMode === 'fit' ? calculateViewportScale(imageNaturalSize, stageSize, zoomBehavior) * zoom : zoom;
@@ -1684,7 +1780,7 @@ export default function App() {
           <div>
             <div className="brand-title">{t.appName}</div>
             <div className="brand-subtitle">
-              {totalImages.toLocaleString()} {t.imageCount} · {totalDocuments.toLocaleString()} {t.documentCount} · {totalArchives.toLocaleString()} {t.archiveCount}
+              {totalImages.toLocaleString()} {t.imageCount} · {totalDocuments.toLocaleString()} {t.documentCount} · {totalMedia.toLocaleString()} {t.mediaCount} · {totalArchives.toLocaleString()} {t.archiveCount}
             </div>
           </div>
           <div className="brand-actions">
@@ -1886,7 +1982,7 @@ export default function App() {
 
         <section
           ref={imageStageRef}
-          className={`image-stage stage-bg-${stageBackground} ${viewerMode} ${fullscreen ? 'view-fullscreen' : ''} ${imagePayload ? 'has-image' : ''} ${documentPayload ? 'has-document' : ''} ${panning ? 'panning' : ''}`}
+          className={`image-stage stage-bg-${stageBackground} ${viewerMode} ${fullscreen ? 'view-fullscreen' : ''} ${imagePayload ? 'has-image' : ''} ${documentPayload ? 'has-document' : ''} ${activeIsMedia ? 'has-media' : ''} ${panning ? 'panning' : ''}`}
           onDoubleClick={handleStageDoubleClick}
           onPointerDown={activeIsImage ? handlePanStart : undefined}
           onPointerMove={activeIsImage ? handlePanMove : undefined}
@@ -1901,10 +1997,10 @@ export default function App() {
               <span>{t.loadingImage}</span>
             </div>
           ) : documentPayload ? (
-            <article className={`document-viewer document-theme-${documentTheme} ${activeImage?.kind === 'text' ? 'plain-text' : activeImage?.kind === 'markdown' ? 'markdown' : 'code'}`}>
+            <article className={`document-viewer document-theme-${documentTheme} ${activeImage?.kind === 'text' || activeIsSubtitle ? 'plain-text' : activeImage?.kind === 'markdown' ? 'markdown' : 'code'}`}>
               <header>
                 <FontAwesomeIcon icon={faFileLines} />
-                <strong>{activeImage?.kind === 'text' ? t.textPreview : activeImage?.kind === 'markdown' ? t.markdownPreview : t.codePreview}</strong>
+                <strong>{activeIsSubtitle ? t.subtitlePreview : activeImage?.kind === 'text' ? t.textPreview : activeImage?.kind === 'markdown' ? t.markdownPreview : t.codePreview}</strong>
                 <span>{documentPayload.location}</span>
                 {supportsDocumentPreview(documentPayload.format) ? (
                   <div className="document-view-mode" role="group">
@@ -1915,7 +2011,7 @@ export default function App() {
               </header>
               {documentViewMode === 'raw' && supportsDocumentPreview(documentPayload.format) ? (
                 <CodeHighlight code={documentPayload.text} language={languageByFormat(documentPayload.format)} truncatedLabel={t.previewTruncated} />
-              ) : documentPayload.format === '.txt' ? (
+              ) : activeIsSubtitle || documentPayload.format === '.txt' ? (
                 <pre>{documentPayload.text}</pre>
               ) : documentPayload.format === '.md' || documentPayload.format === '.markdown' ? (
                 <div className="markdown-body">
@@ -1962,6 +2058,26 @@ export default function App() {
                 <CodeHighlight code={documentPayload.text} language={languageByFormat(documentPayload.format)} truncatedLabel={t.previewTruncated} />
               )}
             </article>
+          ) : activeIsMedia ? (
+            <MediaPlayer
+              entry={activeImage!}
+              subtitle={activeSubtitle}
+              labels={{
+                loading: t.loadingMedia,
+                playbackFailed: t.mediaPlaybackFailed,
+                subtitleFailed: t.subtitleFailed,
+                play: t.mediaPlay,
+                pause: t.mediaPause,
+                backward: t.mediaBackward,
+                forward: t.mediaForward,
+                mute: t.mediaMute,
+                unmute: t.mediaUnmute,
+                subtitlesOn: t.mediaSubtitlesOn,
+                subtitlesOff: t.mediaSubtitlesOff,
+                fullscreen: t.fullscreen,
+                seek: t.mediaSeek,
+              }}
+            />
           ) : imagePayload ? (
             <img
               src={imagePayload.dataUri}
@@ -2034,6 +2150,7 @@ export default function App() {
                   <option value="all">{t.allContent}</option>
                   <option value="image">{t.imagesOnly}</option>
                   <option value="document">{t.documentsOnly}</option>
+                  <option value="media">{t.mediaOnly}</option>
                 </select>
                 <select value={workspaceSourceFilter} onChange={(event) => setWorkspaceSourceFilter(event.target.value as WorkspaceSourceFilter)}>
                   <option value="all">{t.allSources}</option>
@@ -2201,6 +2318,9 @@ export default function App() {
               <button className={`settings-tab ${settingsTab === 'documentFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('documentFormats')}>
                 {t.documentFormats}
               </button>
+              <button className={`settings-tab ${settingsTab === 'mediaFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('mediaFormats')}>
+                {t.mediaFormats}
+              </button>
               <button className={`settings-tab ${settingsTab === 'about' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('about')}>
                 {t.about}
               </button>
@@ -2277,6 +2397,28 @@ export default function App() {
                           type="checkbox"
                           checked={enabledDocumentExtensions.includes(extension)}
                           onChange={() => toggleDocumentExtension(extension)}
+                        />
+                        <span>{extension}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : settingsTab === 'mediaFormats' ? (
+                <div className="settings-stack">
+                  <div className="settings-format-header">
+                    <span>{t.mediaFormats}</span>
+                    <div className="settings-format-actions">
+                      <button className="settings-link-button" type="button" onClick={() => setEnabledMediaExtensions([])}>{t.clearAll}</button>
+                      <button className="settings-link-button" type="button" onClick={() => setEnabledMediaExtensions([...bootstrap.supportedMedia])}>{t.selectAll}</button>
+                    </div>
+                  </div>
+                  <div className="format-grid">
+                    {bootstrap.supportedMedia.map((extension) => (
+                      <label className="format-option" key={extension}>
+                        <input
+                          type="checkbox"
+                          checked={enabledMediaExtensions.includes(extension)}
+                          onChange={() => toggleMediaExtension(extension)}
                         />
                         <span>{extension}</span>
                       </label>
@@ -3202,6 +3344,10 @@ function resolveInitialEnabledImageExtensions(): string[] {
 
 function resolveInitialEnabledDocumentExtensions(): string[] {
   return readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, fallbackBootstrap.supportedDocuments) ?? [];
+}
+
+function resolveInitialEnabledMediaExtensions(): string[] {
+  return readStoredEnabledExtensions(storageKeys.enabledMediaExtensions, fallbackBootstrap.supportedMedia) ?? [];
 }
 
 function readStoredEnabledExtensions(storageKey: string, supportedExtensions: string[]): string[] | null {

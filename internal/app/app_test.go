@@ -7,6 +7,8 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +71,15 @@ func TestSeparateExtensionFilters(t *testing.T) {
 	if len(newExtensionFilter([]string{}, supportedDocumentExtensions)) != 0 {
 		t.Fatal("empty document selection should disable all documents")
 	}
+	if !isSupportedMedia(".mp4") || entryKind(".mp4") != "video" {
+		t.Fatal("video media format was not classified")
+	}
+	if !isSupportedMedia(".srt") || entryKind(".srt") != "subtitle" {
+		t.Fatal("subtitle format was not classified")
+	}
+	if entryKind(".ts") != "code" {
+		t.Fatal("TypeScript extension was misclassified as media")
+	}
 }
 
 func TestDecodeUTF16Documents(t *testing.T) {
@@ -92,6 +103,32 @@ func TestDecodeShiftJISDocument(t *testing.T) {
 	}
 	if got := decodeDocumentText(encoded); got != "こんにちは、日本語" {
 		t.Fatalf("unexpected Shift-JIS result: %q", got)
+	}
+}
+
+func TestDecodeGB18030Document(t *testing.T) {
+	encoded, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("简体中文字幕"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeDocumentText(encoded); got != "简体中文字幕" {
+		big5Text, _ := traditionalchinese.Big5.NewDecoder().Bytes(encoded)
+		gbText, _ := simplifiedchinese.GB18030.NewDecoder().Bytes(encoded)
+		t.Logf("GB data: Big5=%q (%d), GB=%q (%d)", string(big5Text), scoreDecodedDocument(string(big5Text)), string(gbText), scoreDecodedDocument(string(gbText)))
+		t.Fatalf("unexpected GB18030 result: %q", got)
+	}
+}
+
+func TestDecodeBig5Document(t *testing.T) {
+	encoded, err := traditionalchinese.Big5.NewEncoder().Bytes([]byte("繁體中文字幕"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeDocumentText(encoded); got != "繁體中文字幕" {
+		big5Text, _ := traditionalchinese.Big5.NewDecoder().Bytes(encoded)
+		gbText, _ := simplifiedchinese.GB18030.NewDecoder().Bytes(encoded)
+		t.Logf("Big5 data: Big5=%q (%d), GB=%q (%d)", string(big5Text), scoreDecodedDocument(string(big5Text)), string(gbText), scoreDecodedDocument(string(gbText)))
+		t.Fatalf("unexpected Big5 result: %q", got)
 	}
 }
 
@@ -238,7 +275,7 @@ func TestScanReportsCorruptArchive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "broken.tgz"), []byte("not gzip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := New().ScanDirectory(directory, nil, nil, 0)
+	result, err := New().ScanDirectory(directory, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,11 +284,149 @@ func TestScanReportsCorruptArchive(t *testing.T) {
 	}
 }
 
+func TestScanFindsMediaAndSubtitleEntries(t *testing.T) {
+	directory := t.TempDir()
+	for _, name := range []string{"clip.mp4", "track.flac", "captions.srt"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte("placeholder"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := New().ScanDirectory(directory, nil, nil, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := make(map[string]string, len(result.Node.Images))
+	for _, entry := range result.Node.Images {
+		kinds[entry.Name] = entry.Kind
+	}
+	for name, expectedKind := range map[string]string{
+		"clip.mp4":     "video",
+		"track.flac":   "audio",
+		"captions.srt": "subtitle",
+	} {
+		if kinds[name] != expectedKind {
+			t.Fatalf("unexpected kind for %s: %q", name, kinds[name])
+		}
+	}
+}
+
+func TestMediaExtensionSelectionControlsScan(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "clip.mp4"), []byte("placeholder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := New().ScanDirectory(directory, nil, nil, []string{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Node.Images) != 0 {
+		t.Fatalf("disabled media format should not be scanned: %#v", result.Node.Images)
+	}
+}
+
+func TestScanFindsMediaInsideArchive(t *testing.T) {
+	directory := t.TempDir()
+	writeZipEntry(t, filepath.Join(directory, "media.zip"), "clip.mp4", []byte("placeholder"))
+
+	result, err := New().ScanDirectory(directory, nil, nil, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Node.Children) != 1 || len(result.Node.Children[0].Images) != 1 {
+		t.Fatalf("expected media entry inside archive: %#v", result.Node.Children)
+	}
+	entry := result.Node.Children[0].Images[0]
+	if entry.Name != "clip.mp4" || entry.Kind != "video" || entry.Source != "archive" {
+		t.Fatalf("unexpected archived media entry: %#v", entry)
+	}
+}
+
+func TestLoadDocumentAcceptsSubtitleAndRejectsPlaybackMedia(t *testing.T) {
+	directory := t.TempDir()
+	subtitlePath := filepath.Join(directory, "captions.srt")
+	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:00,000 --> 00:00:01,000\n字幕"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := New().LoadDocumentByPath(subtitlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Format != ".srt" || !strings.Contains(payload.Text, "字幕") {
+		t.Fatalf("unexpected subtitle payload: %#v", payload)
+	}
+
+	videoPath := filepath.Join(directory, "clip.mp4")
+	if err := os.WriteFile(videoPath, []byte("not a text document"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New().LoadDocumentByPath(videoPath); err == nil {
+		t.Fatal("playback media should not be loaded as a text document")
+	}
+}
+
+func TestMediaHandlerServesByteRanges(t *testing.T) {
+	application := New()
+	t.Cleanup(application.cleanupMediaCache)
+	mediaPath := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mediaURL, err := application.PrepareMediaByPath(mediaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, mediaURL, nil)
+	request.Header.Set("Range", "bytes=2-5")
+	response := httptest.NewRecorder()
+	NewMediaMiddleware(application)(http.NotFoundHandler()).ServeHTTP(response, request)
+	if response.Code != http.StatusPartialContent {
+		t.Fatalf("unexpected media status: %d", response.Code)
+	}
+	if response.Body.String() != "2345" {
+		t.Fatalf("unexpected media range: %q", response.Body.String())
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "video/mp4" {
+		t.Fatalf("unexpected media MIME: %q", contentType)
+	}
+}
+
+func TestMediaHandlerExtractsArchiveEntryForSeeking(t *testing.T) {
+	application := New()
+	t.Cleanup(application.cleanupMediaCache)
+	archivePath := filepath.Join(t.TempDir(), "media.zip")
+	writeZipEntry(t, archivePath, "folder/clip.mp4", []byte("archive-media"))
+	mediaURL, err := application.PrepareMediaByPath(archivePath + "::folder/clip.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, mediaURL, nil)
+	request.Header.Set("Range", "bytes=8-12")
+	response := httptest.NewRecorder()
+	NewMediaMiddleware(application)(http.NotFoundHandler()).ServeHTTP(response, request)
+	if response.Code != http.StatusPartialContent || response.Body.String() != "media" {
+		t.Fatalf("unexpected archived media response: status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestPrepareMediaRejectsDocuments(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "readme.txt")
+	if err := os.WriteFile(filePath, []byte("not media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New().PrepareMediaByPath(filePath); err == nil {
+		t.Fatal("document should not be registered as playback media")
+	}
+}
+
 func TestCancelledOperationStopsScan(t *testing.T) {
 	application := New()
 	operationID := application.BeginOperation()
 	application.CancelOperation(operationID)
-	_, err := application.ScanDirectory(t.TempDir(), nil, nil, operationID)
+	_, err := application.ScanDirectory(t.TempDir(), nil, nil, nil, operationID)
 	if !errors.Is(err, errOperationCancelled) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}

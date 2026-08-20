@@ -54,6 +54,10 @@ export function LoadLibraryCache(arg1) {
   return window['go']['app']['App']['LoadLibraryCache'](arg1);
 }
 
+export function PrepareMediaByPath(arg1) {
+  return window['go']['app']['App']['PrepareMediaByPath'](arg1);
+}
+
 export function LoadThumbnailByPath(arg1, arg2) {
   return window['go']['app']['App']['LoadThumbnailByPath'](arg1, arg2);
 }
@@ -66,8 +70,8 @@ export function SaveLibraryCache(arg1, arg2) {
   return window['go']['app']['App']['SaveLibraryCache'](arg1, arg2);
 }
 
-export function ScanDirectory(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['ScanDirectory'](arg1, arg2, arg3, arg4);
+export function ScanDirectory(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['ScanDirectory'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SelectDirectory(arg1) {

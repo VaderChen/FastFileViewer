@@ -12,11 +12,14 @@
 
 ## 功能
 
-- 逐目錄掃描本機資料夾，建立圖片、文件與程式碼的統一內容樹。
+- 逐目錄掃描本機資料夾，建立圖片、文件、程式碼、影音與字幕的統一內容樹。
 - 不解壓縮直接瀏覽 ZIP、TAR、TGZ 與 TAR.GZ 內的支援內容。
 - 預覽 PNG、JPEG、GIF、WebP、BMP、SVG、TIFF 與 HEIC。
 - 顯示 TXT、Markdown、JSON、CSV、TSV、常見設定檔與多種程式語言。
 - 提供 Markdown Render、程式碼語法高亮、JSON 樹及可搜尋排序的 CSV／TSV 表格。
+- 播放常見影片與音訊格式，提供進度跳轉、音量、全螢幕及鍵盤控制。
+- 自動配對同目錄的 VTT、SRT、ASS、SSA、SMI 與文字型 SUB 字幕。
+- 可分別設定要掃描的圖片、文件、影音及字幕格式。
 - 三區式內容工作區、持久化釘選目錄、批次載入及可取消作業。
 - 跨資料夾與壓縮檔多選匯出、SHA-256 檢查及完全重複檔案偵測。
 - 目錄索引、縮圖及相鄰圖片快取均保存在本機，不需網路服務。
@@ -24,9 +27,7 @@
 
 ## 開源版
 
-公開原始碼版本不使用 StoreKit、不啟用 App Sandbox，也不包含 Apple 憑證、Provisioning Profile、私鑰、App Store PKG 或公證流程。應用程式可存取目前登入帳號原本就有權限的檔案與目錄；macOS 對桌面、文件、下載項目或外接磁碟等隱私保護位置仍可能要求授權。
-
-公開建置預設使用 ad-hoc 簽章，適合自行建置與驗證。GitHub 公開版本不包含 Developer ID、Apple notarization 或 DMG 發布流程；散布者須自行負責正式簽章、公證與發布要求。
+公開原始碼版本不使用 StoreKit、不啟用 App Sandbox，也不包含本機發布憑證或個人化設定。應用程式可存取目前登入帳號原本就有權限的檔案與目錄；macOS 對桌面、文件、下載項目或外接磁碟等隱私保護位置仍可能要求授權。
 
 ## 開發需求
 
@@ -72,13 +73,7 @@ build/bin/FastFileViewer.app
 - `Licenses/THIRD-PARTY-LICENSES.txt`
 - `build-metadata.json`
 
-如需使用已安裝的 Developer ID Application 簽章，可自行指定：
-
-```bash
-CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
-```
-
-此命令只負責簽章，不會進行 Apple notarization。
+預先建置版本及 SHA-256 校驗檔可由 [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) 取得。
 
 ## 資料與隱私
 
@@ -88,7 +83,7 @@ CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
 - 目錄索引與縮圖位於 `os.UserCacheDir()` 下的 `FastFileViewer` 目錄。
 - App 只會匯出到使用者主動選取的位置。
 
-請勿提交 `cert/`、`.env*`、安裝包、簽章資產、個人檔案或包含真實路徑的除錯資料。安全問題請參閱 [SECURITY.md](SECURITY.md)。
+請勿提交 `.env*`、安裝包、本機發布資產、個人檔案或包含真實路徑的除錯資料。安全問題請參閱 [SECURITY.md](SECURITY.md)。
 
 ## 授權
 

@@ -20,6 +20,7 @@ export namespace app {
 	    defaultPath: string;
 	    supportedImages: string[];
 	    supportedDocuments: string[];
+	    supportedMedia: string[];
 	    supportedPacks: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -31,6 +32,7 @@ export namespace app {
 	        this.defaultPath = source["defaultPath"];
 	        this.supportedImages = source["supportedImages"];
 	        this.supportedDocuments = source["supportedDocuments"];
+	        this.supportedMedia = source["supportedMedia"];
 	        this.supportedPacks = source["supportedPacks"];
 	    }
 	}
@@ -237,4 +239,3 @@ export namespace app {
 	}
 
 }
-

@@ -8,6 +8,7 @@ APP_NAME="FastFileViewer"
 APP_PATH="$SCRIPT_DIR/build/bin/$APP_NAME.app"
 TMP_ROOT=""
 LOCAL_BUILD_CACHE="${FASTFILEVIEWER_BUILD_CACHE:-${TMPDIR:-/tmp}/fastfileviewer-build-cache}"
+
 export MACOSX_DEPLOYMENT_TARGET="12.0"
 export CGO_CFLAGS="-mmacosx-version-min=12.0"
 export CGO_LDFLAGS="-mmacosx-version-min=12.0"
@@ -24,7 +25,7 @@ APP_BUNDLE_VERSION="${APP_BUNDLE_VERSION:-$APP_MARKETING_VERSION.$APP_BUILD_LABE
 
 if (( $# > 0 )); then
   echo "用法：$0"
-  echo "公開版預設使用 ad-hoc 簽章且不啟用 App Sandbox。"
+  echo "未指定本機簽章設定時使用 ad-hoc 簽章，且不啟用 App Sandbox。"
   exit 1
 fi
 
@@ -71,13 +72,19 @@ cleanup_codesign_artifacts() {
   fi
 }
 
-required_commands=(go node npm rsync codesign ditto)
+required_commands=(go node npm rsync codesign ditto security)
 for command_name in "${required_commands[@]}"; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "缺少必要指令：$command_name"
     exit 1
   fi
 done
+
+if [[ "$CODESIGN_IDENTITY" != "-" ]] &&
+  ! security find-identity -v -p codesigning | grep -Fq "$CODESIGN_IDENTITY"; then
+  echo "找不到指定的本機簽章身份。"
+  exit 1
+fi
 
 cd "$SCRIPT_DIR"
 WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
@@ -154,6 +161,7 @@ mkdir -p "$STAGING_DIR"
 rsync -a \
   --exclude '/.git/' \
   --exclude '/.codex-tmp/' \
+  --exclude '/.env*' \
   --exclude '.DS_Store' \
   --exclude '._*' \
   --exclude '*.bak' \
@@ -198,7 +206,7 @@ SIGNING_ARGUMENTS=(--force --deep --sign "$CODESIGN_IDENTITY" --options runtime)
 if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
   echo "以 ad-hoc 簽章簽署非沙盒 App..."
 else
-  echo "以指定身分簽署：$CODESIGN_IDENTITY"
+  echo "使用本機簽章設定簽署..."
   SIGNING_ARGUMENTS+=(--timestamp)
 fi
 codesign "${SIGNING_ARGUMENTS[@]}" "$STAGING_APP_PATH"
@@ -212,4 +220,9 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 echo "完成：$APP_PATH"
 echo "Bundle ID：$APP_BUNDLE_ID"
 echo "來源版本：$BUILD_TAG ($BUILD_COMMIT, $BUILD_STATE)"
-echo "公開版未啟用 App Sandbox；預設 ad-hoc 簽章僅適合自行建置與驗證。"
+if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+  echo "簽章：ad-hoc（僅適合自行建置與驗證）"
+else
+  echo "簽章：本機 Developer ID 設定"
+fi
+echo "此建置未啟用 App Sandbox。"
