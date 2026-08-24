@@ -14,6 +14,10 @@ export function CalculateChecksum(arg1, arg2) {
   return window['go']['app']['App']['CalculateChecksum'](arg1, arg2);
 }
 
+export function CancelDownload(arg1) {
+  return window['go']['app']['App']['CancelDownload'](arg1);
+}
+
 export function CancelOperation(arg1) {
   return window['go']['app']['App']['CancelOperation'](arg1);
 }
@@ -32,6 +36,10 @@ export function FinishOperation(arg1) {
 
 export function GetAppInfo() {
   return window['go']['app']['App']['GetAppInfo']();
+}
+
+export function ListDownloads() {
+  return window['go']['app']['App']['ListDownloads']();
 }
 
 export function LoadDocumentByPath(arg1) {
@@ -54,16 +62,36 @@ export function LoadLibraryCache(arg1) {
   return window['go']['app']['App']['LoadLibraryCache'](arg1);
 }
 
-export function PrepareMediaByPath(arg1) {
-  return window['go']['app']['App']['PrepareMediaByPath'](arg1);
-}
-
 export function LoadThumbnailByPath(arg1, arg2) {
   return window['go']['app']['App']['LoadThumbnailByPath'](arg1, arg2);
 }
 
+export function OpenDownloadsDirectory() {
+  return window['go']['app']['App']['OpenDownloadsDirectory']();
+}
+
+export function PrepareCompatibleMediaByPath(arg1) {
+  return window['go']['app']['App']['PrepareCompatibleMediaByPath'](arg1);
+}
+
+export function PrepareMediaByPath(arg1) {
+  return window['go']['app']['App']['PrepareMediaByPath'](arg1);
+}
+
+export function RemoveDownload(arg1) {
+  return window['go']['app']['App']['RemoveDownload'](arg1);
+}
+
 export function ResetLibrary() {
   return window['go']['app']['App']['ResetLibrary']();
+}
+
+export function ResolveDownloadURL(arg1) {
+  return window['go']['app']['App']['ResolveDownloadURL'](arg1);
+}
+
+export function RevealDownload(arg1) {
+  return window['go']['app']['App']['RevealDownload'](arg1);
 }
 
 export function SaveLibraryCache(arg1, arg2) {
@@ -76,4 +104,12 @@ export function ScanDirectory(arg1, arg2, arg3, arg4, arg5) {
 
 export function SelectDirectory(arg1) {
   return window['go']['app']['App']['SelectDirectory'](arg1);
+}
+
+export function StartDownload(arg1) {
+  return window['go']['app']['App']['StartDownload'](arg1);
+}
+
+export function StartResolvedDownload(arg1, arg2, arg3) {
+  return window['go']['app']['App']['StartResolvedDownload'](arg1, arg2, arg3);
 }

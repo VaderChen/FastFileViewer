@@ -2,7 +2,7 @@
 
 ## 專案定位
 
-FastFileViewer 是 macOS 離線內容工作台，可瀏覽一般資料夾與 ZIP、TAR、TGZ、TAR.GZ 內的圖片、文字、Markdown、程式碼、常見設定檔、影音及字幕。
+FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾與 ZIP、TAR、TGZ、TAR.GZ 內的圖片、文字、Markdown、程式碼、常見設定檔、影音及字幕，並可由使用者明確提供的公開網址下載內容。
 
 核心能力：
 
@@ -10,9 +10,14 @@ FastFileViewer 是 macOS 離線內容工作台，可瀏覽一般資料夾與 ZIP
 - 圖片 Viewer、Markdown Render、結構化資料與程式碼語法高亮整合於同一內容樹。
 - 三區式內容工作區、格式篩選、釘選目錄、多選匯出及 SHA-256 完全重複偵測。
 - 大型內容樹與縮圖使用本機磁碟快取；圖片使用容量受限 LRU 與相鄰預載。
-- 完全離線，不執行程式碼、不執行 Markdown 原始 HTML。
+- 掃描、Render、快取與內容分析完全在本機進行，不執行程式碼或 Markdown 原始 HTML。
 - 本機影音採可跳轉串流，壓縮檔影音使用生命週期受控的暫存檔。
+- MKV 在偵測到本機 `ffmpeg` 時，優先轉封裝並在必要時使用 VideoToolbox 轉碼成暫存 MP4。
+- 音樂播放器透過 Web Audio API 的 `AnalyserNode` 繪製即時頻譜與波形，暫停時停止動畫更新；頻譜使用 8192 FFT 與對數分配，目標涵蓋 18 Hz–24 kHz，並受來源取樣率的 Nyquist 上限約束。波形依畫布寬度降採樣至最多 1,600 點。
+- MP2／MP3、M4A／M4B、WAV、AAC、FLAC、OGG／OPUS、AIFF 與 CAF 優先原生播放；FLAC 等原生解碼失敗時自動要求相容 M4A。
+- WMA、APE、WavPack、獨立 ALAC、AC-3、AMR 與 MKA 直接透過本機 `ffmpeg` 轉為 256 kbps AAC M4A 暫存檔。
 - 自動配對同目錄 sidecar 字幕，並轉換常見文字字幕格式供播放器顯示。
+- 「下載項目」只對使用者明確貼上或拖入的公開 HTTP/HTTPS URL 建立連出連線，包含未加密且已結束的 HLS VOD。
 
 ## 開源身分
 
@@ -34,15 +39,17 @@ FastFileViewer 是 macOS 離線內容工作台，可瀏覽一般資料夾與 ZIP
 - Markdown：`react-markdown`、`remark-gfm`
 - 語法上色：`highlight.js`、`rehype-highlight`
 - 圖示：Font Awesome
+- 媒體相容工具：使用者選用安裝的 `ffmpeg`，用於 MKV 與非原生音訊；不隨 Repository 或 App Bundle 散布
 
 ## 主要目錄
 
 - `main.go`：Wails 入口與視窗設定。
 - `internal/app/app.go`：掃描、壓縮檔、圖片／文件載入、快取、匯出與重複偵測。
 - `internal/app/media.go`：媒體註冊、Range 回應、壓縮檔媒體暫存與資產路由。
+- `internal/app/download.go`：安全 URL 驗證、下載佇列、進度、持久化及 HLS VOD 合併。
 - `internal/app/types.go`：前後端資料模型。
 - `frontend/src/App.tsx`：內容樹、Viewer、工作區、設定與 About 授權資訊。
-- `frontend/src/MediaPlayer.tsx`：影片與音訊播放、控制列及字幕掛載。
+- `frontend/src/MediaPlayer.tsx`：影片與音訊播放、Web Audio 頻譜／波形、相容音訊 fallback、控制列及字幕掛載。
 - `frontend/src/mediaSupport.ts`：sidecar 字幕配對與 WebVTT 轉換。
 - `frontend/src/styles.css`：版面與 Viewer 樣式。
 - `scripts/generate-third-party-notices.mjs`：產生第三方套件清冊與完整授權文字。
@@ -59,6 +66,12 @@ FastFileViewer 是 macOS 離線內容工作台，可瀏覽一般資料夾與 ZIP
 - `LoadThumbnailByPath(...)`：產生或讀取縮圖快取。
 - `LoadDocumentByPath(...)`：讀取一般或壓縮檔內文件。
 - `PrepareMediaByPath(...)`：驗證媒體路徑並建立受控本機播放網址。
+- `PrepareCompatibleMediaByPath(...)`：原生音訊解碼失敗時，建立並註冊生命週期受控的 M4A 相容暫存檔。
+- `StartDownload(url)`／`ListDownloads()`：建立下載及取得佇列狀態。
+- `ResolveDownloadURL(url)`：讀取公開頁面的 HTML／inline script 並回傳最多 16 個 `.m3u8` 候選，不執行 JavaScript。
+- `StartResolvedDownload(sourceURL, hlsURL, name)`：以來源頁推導的安全 Referer／Origin 建立已選取 HLS 的獨立下載。
+- `CancelDownload(id)`／`RemoveDownload(id)`：取消下載或移除歷史紀錄，不刪除已完成檔案。
+- `RevealDownload(id)`／`OpenDownloadsDirectory()`：在 Finder 顯示完成檔案或下載資料夾。
 - `LoadLibraryCache(...)`／`SaveLibraryCache(...)`：讀寫目錄索引快取。
 - `ExportImages(...)`：串流匯出選取內容。
 - `DetectDuplicates(...)`／`CalculateChecksum(...)`：串流 SHA-256。
@@ -74,6 +87,16 @@ FastFileViewer 是 macOS 離線內容工作台，可瀏覽一般資料夾與 ZIP
 - AppleDouble、`.DS_Store`、`__MACOSX` 與明顯二進位文件會被忽略或拒絕 Render。
 - 媒體網址只接受後端已註冊的項目 ID，不直接公開任意檔案系統路徑。
 - 壓縮檔媒體暫存於作業系統暫存目錄，重新掃描或關閉程式時清理。
+- 音訊相容轉換只讀取使用者已選取或掃描到的本機項目，不執行來源內容；轉換檔與 MKV 快取使用相同清理週期。
+- URL 下載只接受 HTTP/HTTPS，拒絕 URL credentials、localhost、私有 IP、link-local、multicast、unspecified、CGNAT 與保留測試網段。
+- 自訂 `DialContext` 在實際連線時重新解析並驗證 IP；每次 redirect 也重新驗證，且不使用環境 Proxy。
+- 下載不使用 Cookie、登入狀態或自訂認證，不繞過 DRM、付費牆或加密串流。
+- 一般單檔上限 4 GB；文字、HTML、HLS 播放清單上限 32 MB；HLS 上限 20,000 段且必須包含 `EXT-X-ENDLIST`。
+- HLS master playlist 依 `BANDWIDTH` 選擇最高頻寬 variant；拒絕 `EXT-X-KEY` 加密內容，支援相對 URL、初始化片段及 byte range。
+- 前端對單一網頁候選直接呼叫 `StartResolvedDownload`；複數候選顯示 DLG 供複選，確認後逐項建立下載。沒有候選時維持 HTML 下載。
+- Resolver 不使用瀏覽器 Cookie 或模擬／繞過 Cloudflare 等反機器人驗證；401／403 會回傳明確提示，要求直接 `.m3u8`。
+- 下載使用同目錄暫存檔及排他 hard link 完成，不覆寫既有檔案；目的地為 `~/Downloads/FastFileViewer`。
+- 下載紀錄位於 `os.UserConfigDir()/FastFileViewer/downloads.json`，不保存 URL query 或 fragment；App 關閉時未完成項目下次啟動會標示為失敗。
 
 ## 開發模式
 
@@ -97,7 +120,7 @@ FastFileViewer 是 macOS 離線內容工作台，可瀏覽一般資料夾與 ZIP
 可覆寫參數：
 
 ```bash
-APP_MARKETING_VERSION=1.26.0815 \
+APP_MARKETING_VERSION=1.26.0824 \
 APP_BUILD_LABEL=1200 \
 APP_BUNDLE_ID=com.example.fastfileviewer \
 BUILD_SOURCE_URL=https://github.com/example/FastFileViewer \
@@ -108,7 +131,7 @@ BUILD_SOURCE_URL=https://github.com/example/FastFileViewer \
 
 建置流程：
 
-1. `go mod verify`、`go vet`、`go test -race`。
+1. `go mod verify`、`go vet`、`go test -race`，包含 URL、重新導向、HLS、檔名及持久化測試。
 2. 前端測試、production build 與 production dependency audit。
 3. 產生 `THIRD-PARTY-NOTICES.md` 與 `THIRD-PARTY-LICENSES.txt`。
 4. 在本機暫存目錄建立 Wails App。

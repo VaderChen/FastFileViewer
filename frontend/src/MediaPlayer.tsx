@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImageEntry } from './types';
-import { convertSubtitleToWebVTT, subtitleLanguageFromName } from './mediaSupport';
+import {
+  audioSpectrumMaximumDecibels,
+  audioSpectrumMinimumDecibels,
+  calculateLogSpectrumAmplitudes,
+  convertSubtitleToWebVTT,
+  subtitleLanguageFromName,
+} from './mediaSupport';
 
 interface MediaPlayerLabels {
   loading: string;
@@ -16,16 +22,42 @@ interface MediaPlayerLabels {
   subtitlesOff: string;
   fullscreen: string;
   seek: string;
+  visualizer: string;
+  spectrum: string;
+  waveform: string;
+  bothVisualizations: string;
 }
 
 interface MediaPlayerProps {
   entry: ImageEntry;
   subtitle: ImageEntry | null;
   labels: MediaPlayerLabels;
+  visible?: boolean;
+  pausePlayback?: boolean;
+  onAudioEnded?: () => boolean;
 }
 
-export function MediaPlayer({ entry, subtitle, labels }: MediaPlayerProps) {
+interface AudioGraph {
+  context: AudioContext;
+  source: MediaElementAudioSourceNode;
+  analyser: AnalyserNode;
+  muteGain: GainNode;
+  disposeTimer: number | null;
+}
+
+type AudioVisualizationMode = 'spectrum' | 'waveform' | 'both';
+
+const audioGraphs = new WeakMap<HTMLAudioElement, AudioGraph>();
+const audioVisualizationStorageKey = 'fastfileviewer.audioVisualizationMode';
+
+export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlayback = false, onAudioEnded }: MediaPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioCanvasRef = useRef<HTMLCanvasElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioAnimationRef = useRef<number | null>(null);
+  const audioFallbackAttemptedRef = useRef(false);
+  const resumeAudioAfterSourceChangeRef = useRef(false);
   const videoFrameRef = useRef<HTMLDivElement>(null);
   const [mediaURL, setMediaURL] = useState('');
   const [subtitleURL, setSubtitleURL] = useState('');
@@ -37,29 +69,150 @@ export function MediaPlayer({ entry, subtitle, labels }: MediaPlayerProps) {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [audioVisualizationMode, setAudioVisualizationMode] = useState<AudioVisualizationMode>(resolveInitialAudioVisualizationMode);
+
+  useEffect(() => {
+    localStorage.setItem(audioVisualizationStorageKey, audioVisualizationMode);
+  }, [audioVisualizationMode]);
 
   useEffect(() => {
     let cancelled = false;
+    resumeAudioAfterSourceChangeRef.current = resumeAudioAfterSourceChangeRef.current
+      || (entry.kind === 'audio' && audioRef.current !== null && !audioRef.current.paused);
     setMediaURL('');
     setError('');
     setPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    audioFallbackAttemptedRef.current = entry.kind === 'audio' && requiresEagerAudioCompatibility(entry.format);
     void window.go?.app?.App?.PrepareMediaByPath?.(entry.path)
       .then((url) => {
         if (!cancelled && url) {
           setMediaURL(url);
         }
       })
-      .catch(() => {
+      .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(labels.playbackFailed);
+          resumeAudioAfterSourceChangeRef.current = false;
+          setError(reason instanceof Error && reason.message
+            ? reason.message
+            : typeof reason === 'string' && reason
+              ? reason
+              : labels.playbackFailed);
         }
       });
     return () => {
       cancelled = true;
     };
   }, [entry.id, entry.path, labels.playbackFailed]);
+
+  useEffect(() => {
+    if (entry.kind !== 'audio' || !mediaURL) {
+      return;
+    }
+    const audio = audioRef.current;
+    const canvas = audioCanvasRef.current;
+    const AudioContextConstructor = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!audio || !canvas || !AudioContextConstructor) {
+      return;
+    }
+
+    let graph: AudioGraph;
+    try {
+      graph = acquireAudioGraph(audio, AudioContextConstructor);
+    } catch {
+      return;
+    }
+    const { context, analyser } = graph;
+    audioContextRef.current = context;
+
+    const frequencyData = new Float32Array(analyser.frequencyBinCount);
+    const waveformData = new Uint8Array(analyser.fftSize);
+    const draw = () => {
+      if (visible) {
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, audio.paused, audioVisualizationMode);
+      }
+      if (visible && !audio.paused && !audio.ended) {
+        audioAnimationRef.current = window.requestAnimationFrame(draw);
+      } else {
+        audioAnimationRef.current = null;
+      }
+    };
+    const startDrawing = () => {
+      void context.resume().catch(() => undefined);
+      if (visible && audioAnimationRef.current === null) {
+        audioAnimationRef.current = window.requestAnimationFrame(draw);
+      }
+    };
+    const stopDrawing = () => {
+      if (audioAnimationRef.current !== null) {
+        window.cancelAnimationFrame(audioAnimationRef.current);
+        audioAnimationRef.current = null;
+      }
+      if (visible) {
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode);
+      }
+    };
+    const applyMuteImmediately = () => {
+      graph.muteGain.gain.cancelScheduledValues(context.currentTime);
+      graph.muteGain.gain.setValueAtTime(audio.muted ? 0 : 1, context.currentTime);
+    };
+
+    audio.addEventListener('play', startDrawing);
+    audio.addEventListener('pause', stopDrawing);
+    audio.addEventListener('ended', stopDrawing);
+    audio.addEventListener('volumechange', applyMuteImmediately);
+    applyMuteImmediately();
+    if (audio.paused || audio.ended) {
+      if (visible) {
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode);
+      }
+    } else {
+      startDrawing();
+    }
+    return () => {
+      audio.removeEventListener('play', startDrawing);
+      audio.removeEventListener('pause', stopDrawing);
+      audio.removeEventListener('ended', stopDrawing);
+      audio.removeEventListener('volumechange', applyMuteImmediately);
+      if (audioAnimationRef.current !== null) {
+        window.cancelAnimationFrame(audioAnimationRef.current);
+        audioAnimationRef.current = null;
+      }
+      audioContextRef.current = null;
+      releaseAudioGraph(audio, graph);
+    };
+  }, [audioVisualizationMode, entry.kind, mediaURL, visible]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (pausePlayback && audio && !audio.paused) {
+      audio.pause();
+    }
+  }, [pausePlayback]);
+
+  const handleAudioError = async () => {
+    if (audioFallbackAttemptedRef.current || !window.go?.app?.App?.PrepareCompatibleMediaByPath) {
+      setError(labels.playbackFailed);
+      return;
+    }
+    audioFallbackAttemptedRef.current = true;
+    setError('');
+    try {
+      const compatibleURL = await window.go.app.App.PrepareCompatibleMediaByPath(entry.path);
+      if (!compatibleURL) {
+        setError(labels.playbackFailed);
+        return;
+      }
+      setMediaURL(compatibleURL);
+    } catch (reason) {
+      setError(reason instanceof Error && reason.message
+        ? reason.message
+        : typeof reason === 'string' && reason
+          ? reason
+          : labels.playbackFailed);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -261,14 +414,206 @@ export function MediaPlayer({ entry, subtitle, labels }: MediaPlayerProps) {
         </div>
       ) : entry.kind === 'audio' && mediaURL ? (
         <div className="audio-player-card">
-          <strong>{entry.name}</strong>
-          <audio key={mediaURL} controls preload="metadata" src={mediaURL} onError={() => setError(labels.playbackFailed)} />
+          <div className="audio-player-title">
+            <strong>{entry.name}</strong>
+            <span>{entry.format.replace('.', '').toUpperCase()}</span>
+          </div>
+          <div className="audio-visualizer-toolbar">
+            <span>{labels.visualizer}</span>
+            <div role="group" aria-label={labels.visualizer}>
+              <button
+                className={audioVisualizationMode === 'spectrum' ? 'active' : ''}
+                type="button"
+                aria-pressed={audioVisualizationMode === 'spectrum'}
+                onClick={() => setAudioVisualizationMode('spectrum')}
+              >
+                {labels.spectrum}
+              </button>
+              <button
+                className={audioVisualizationMode === 'waveform' ? 'active' : ''}
+                type="button"
+                aria-pressed={audioVisualizationMode === 'waveform'}
+                onClick={() => setAudioVisualizationMode('waveform')}
+              >
+                {labels.waveform}
+              </button>
+              <button
+                className={audioVisualizationMode === 'both' ? 'active' : ''}
+                type="button"
+                aria-pressed={audioVisualizationMode === 'both'}
+                onClick={() => setAudioVisualizationMode('both')}
+              >
+                {labels.bothVisualizations}
+              </button>
+            </div>
+          </div>
+          <canvas
+            ref={audioCanvasRef}
+            className={`audio-visualizer mode-${audioVisualizationMode}`}
+            role="img"
+            aria-label={`${labels.visualizer}: ${audioVisualizationMode === 'spectrum' ? labels.spectrum : audioVisualizationMode === 'waveform' ? labels.waveform : labels.bothVisualizations}`}
+          />
+          <audio
+            ref={audioRef}
+            controls
+            preload="metadata"
+            src={mediaURL}
+            autoPlay={resumeAudioAfterSourceChangeRef.current}
+            onCanPlay={(event) => {
+              if (!resumeAudioAfterSourceChangeRef.current) {
+                return;
+              }
+              resumeAudioAfterSourceChangeRef.current = false;
+              void event.currentTarget.play().catch(() => undefined);
+            }}
+            onPlay={() => {
+              setPlaying(true);
+              void audioContextRef.current?.resume().catch(() => undefined);
+            }}
+            onPause={() => setPlaying(false)}
+            onEnded={() => {
+              setPlaying(false);
+              resumeAudioAfterSourceChangeRef.current = onAudioEnded?.() ?? false;
+            }}
+            onError={() => void handleAudioError()}
+          />
         </div>
       ) : null}
       {error ? <div className="media-playback-error">{error}</div> : null}
       {subtitleError ? <div className="media-subtitle-error">{subtitleError}</div> : null}
     </div>
   );
+}
+
+function acquireAudioGraph(audio: HTMLAudioElement, AudioContextConstructor: typeof AudioContext): AudioGraph {
+  const existing = audioGraphs.get(audio);
+  if (existing) {
+    if (existing.disposeTimer !== null) {
+      window.clearTimeout(existing.disposeTimer);
+      existing.disposeTimer = null;
+    }
+    return existing;
+  }
+  const context = new AudioContextConstructor({ latencyHint: 'interactive' });
+  const source = context.createMediaElementSource(audio);
+  const analyser = context.createAnalyser();
+  const muteGain = context.createGain();
+  analyser.fftSize = 32768;
+  analyser.minDecibels = audioSpectrumMinimumDecibels;
+  analyser.maxDecibels = audioSpectrumMaximumDecibels;
+  analyser.smoothingTimeConstant = 0.78;
+  source.connect(analyser);
+  analyser.connect(muteGain);
+  muteGain.connect(context.destination);
+  const graph = { context, source, analyser, muteGain, disposeTimer: null };
+  audioGraphs.set(audio, graph);
+  return graph;
+}
+
+function releaseAudioGraph(audio: HTMLAudioElement, graph: AudioGraph) {
+  if (graph.disposeTimer !== null) {
+    window.clearTimeout(graph.disposeTimer);
+  }
+  graph.disposeTimer = window.setTimeout(() => {
+    if (audioGraphs.get(audio) !== graph) {
+      return;
+    }
+    graph.source.disconnect();
+    graph.analyser.disconnect();
+    graph.muteGain.disconnect();
+    audioGraphs.delete(audio);
+    void graph.context.close().catch(() => undefined);
+  }, 100);
+}
+
+function requiresEagerAudioCompatibility(format: string): boolean {
+  return ['.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka'].includes(format.toLowerCase());
+}
+
+function resolveInitialAudioVisualizationMode(): AudioVisualizationMode {
+  const storedMode = localStorage.getItem(audioVisualizationStorageKey);
+  return storedMode === 'spectrum' || storedMode === 'waveform' || storedMode === 'both' ? storedMode : 'both';
+}
+
+function drawAudioVisualization(
+  canvas: HTMLCanvasElement,
+  analyser: AnalyserNode,
+  frequencyData: Float32Array<ArrayBuffer>,
+  waveformData: Uint8Array<ArrayBuffer>,
+  idle: boolean,
+  mode: AudioVisualizationMode,
+) {
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+  const displayWidth = Math.max(320, canvas.clientWidth);
+  const displayHeight = Math.max(180, canvas.clientHeight);
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.floor(displayWidth * pixelRatio);
+  const height = Math.floor(displayHeight * pixelRatio);
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  context.clearRect(0, 0, width, height);
+  const background = context.createLinearGradient(0, 0, width, height);
+  background.addColorStop(0, '#10251e');
+  background.addColorStop(0.55, '#163a2f');
+  background.addColorStop(1, '#0b1210');
+  context.fillStyle = background;
+  context.fillRect(0, 0, width, height);
+
+  if (idle) {
+    frequencyData.fill(audioSpectrumMinimumDecibels);
+    waveformData.fill(128);
+  } else {
+    analyser.getFloatFrequencyData(frequencyData);
+    analyser.getByteTimeDomainData(waveformData);
+  }
+
+  if (mode !== 'waveform') {
+    const barCount = 72;
+    const gap = Math.max(2 * pixelRatio, width * 0.0025);
+    const barWidth = Math.max(1, (width - gap * (barCount - 1)) / barCount);
+    const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, analyser.context.sampleRate, analyser.fftSize, barCount, idle);
+    const barGradient = context.createLinearGradient(0, height, 0, 0);
+    barGradient.addColorStop(0, 'rgba(63, 191, 139, 0.9)');
+    barGradient.addColorStop(0.55, 'rgba(111, 218, 174, 0.9)');
+    barGradient.addColorStop(1, 'rgba(205, 250, 226, 0.96)');
+    context.fillStyle = barGradient;
+    for (let index = 0; index < barCount; index += 1) {
+      const amplitude = amplitudes[index];
+      const barHeight = Math.max(3 * pixelRatio, amplitude * height * 0.78);
+      const x = index * (barWidth + gap);
+      context.fillRect(x, height - barHeight, barWidth, barHeight);
+    }
+    if (mode === 'spectrum') {
+      return;
+    }
+  }
+
+  context.beginPath();
+  context.lineWidth = Math.max(2 * pixelRatio, 1.5);
+  context.strokeStyle = idle ? 'rgba(190, 235, 213, 0.28)' : 'rgba(205, 250, 226, 0.92)';
+  context.shadowColor = 'rgba(78, 208, 151, 0.46)';
+  context.shadowBlur = 10 * pixelRatio;
+  const maximumWaveformPoints = Math.max(320, Math.min(1600, Math.floor(displayWidth * 1.5)));
+  const waveformStride = Math.max(1, Math.floor(waveformData.length / maximumWaveformPoints));
+  const waveformPointCount = Math.ceil(waveformData.length / waveformStride);
+  let waveformPointIndex = 0;
+  for (let index = 0; index < waveformData.length; index += waveformStride) {
+    const x = waveformPointIndex * width / Math.max(1, waveformPointCount - 1);
+    const y = idle ? height * 0.46 : (waveformData[index] / 255) * height * 0.54 + height * 0.18;
+    if (waveformPointIndex === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+    waveformPointIndex += 1;
+  }
+  context.stroke();
 }
 
 function formatMediaTime(value: number): string {

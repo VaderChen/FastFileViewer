@@ -77,3 +77,28 @@ type AppInfo struct {
 	SourceURL    string `json:"sourceUrl"`
 	License      string `json:"license"`
 }
+
+type DownloadItem struct {
+	ID          string `json:"id"`
+	URL         string `json:"url"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Status      string `json:"status"`
+	ContentType string `json:"contentType"`
+	Bytes       int64  `json:"bytes"`
+	TotalBytes  int64  `json:"totalBytes"`
+	Error       string `json:"error,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+	CompletedAt int64  `json:"completedAt,omitempty"`
+}
+
+type HLSCandidate struct {
+	URL  string `json:"url"`
+	Name string `json:"name"`
+}
+
+type DownloadResolution struct {
+	SourceURL  string         `json:"sourceUrl"`
+	Name       string         `json:"name"`
+	Candidates []HLSCandidate `json:"candidates"`
+}

@@ -88,6 +88,33 @@ export interface AppInfo {
   license: string;
 }
 
+export type DownloadStatus = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled';
+
+export interface DownloadItem {
+  id: string;
+  url: string;
+  name: string;
+  path: string;
+  status: DownloadStatus;
+  contentType: string;
+  bytes: number;
+  totalBytes: number;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+export interface HLSCandidate {
+  url: string;
+  name: string;
+}
+
+export interface DownloadResolution {
+  sourceUrl: string;
+  name: string;
+  candidates: HLSCandidate[];
+}
+
 export function isMediaKind(kind: EntryKind): kind is MediaEntryKind {
   return kind === 'video' || kind === 'audio' || kind === 'subtitle';
 }

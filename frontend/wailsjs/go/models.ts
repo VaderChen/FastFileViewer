@@ -4,6 +4,11 @@ export namespace app {
 	    hardwareInfo: string;
 	    osVersion: string;
 	    appVersion: string;
+	    commit: string;
+	    tag: string;
+	    buildState: string;
+	    sourceUrl: string;
+	    license: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppInfo(source);
@@ -14,6 +19,11 @@ export namespace app {
 	        this.hardwareInfo = source["hardwareInfo"];
 	        this.osVersion = source["osVersion"];
 	        this.appVersion = source["appVersion"];
+	        this.commit = source["commit"];
+	        this.tag = source["tag"];
+	        this.buildState = source["buildState"];
+	        this.sourceUrl = source["sourceUrl"];
+	        this.license = source["license"];
 	    }
 	}
 	export class BootstrapPayload {
@@ -164,6 +174,86 @@ export namespace app {
 	        this.location = source["location"];
 	    }
 	}
+	export class DownloadItem {
+	    id: string;
+	    url: string;
+	    name: string;
+	    path: string;
+	    status: string;
+	    contentType: string;
+	    bytes: number;
+	    totalBytes: number;
+	    error?: string;
+	    createdAt: number;
+	    completedAt?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new DownloadItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.url = source["url"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.status = source["status"];
+	        this.contentType = source["contentType"];
+	        this.bytes = source["bytes"];
+	        this.totalBytes = source["totalBytes"];
+	        this.error = source["error"];
+	        this.createdAt = source["createdAt"];
+	        this.completedAt = source["completedAt"];
+	    }
+	}
+	export class HLSCandidate {
+	    url: string;
+	    name: string;
+
+	    static createFrom(source: any = {}) {
+	        return new HLSCandidate(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.name = source["name"];
+	    }
+	}
+	export class DownloadResolution {
+	    sourceUrl: string;
+	    name: string;
+	    candidates: HLSCandidate[];
+
+	    static createFrom(source: any = {}) {
+	        return new DownloadResolution(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sourceUrl = source["sourceUrl"];
+	        this.name = source["name"];
+	        this.candidates = this.convertValues(source["candidates"], HLSCandidate);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DuplicateGroup {
 	    hash: string;
 	    totalBytes: number;
@@ -214,7 +304,8 @@ export namespace app {
 	        this.skipped = source["skipped"];
 	    }
 	}
-	
+
+
 	export class ImagePayload {
 	    id: string;
 	    name: string;

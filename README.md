@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/appicon.png" alt="FastFileViewer icon" width="128" />
   <h1>FastFileViewer</h1>
-  <p>以 Go、Wails、React 與 TypeScript 建立的 macOS 離線內容工作台。</p>
+  <p>以 Go、Wails、React 與 TypeScript 建立的 macOS 本機優先檔案工作台。</p>
 </div>
 
 <p align="center">
@@ -17,8 +17,17 @@
 - 預覽 PNG、JPEG、GIF、WebP、BMP、SVG、TIFF 與 HEIC。
 - 顯示 TXT、Markdown、JSON、CSV、TSV、常見設定檔與多種程式語言。
 - 提供 Markdown Render、程式碼語法高亮、JSON 樹及可搜尋排序的 CSV／TSV 表格。
-- 播放常見影片與音訊格式，提供進度跳轉、音量、全螢幕及鍵盤控制。
+- 播放常見影片與音樂格式；音樂視覺化可選柱狀頻譜、波形或全部顯示，並記憶選擇。
+- 瀏覽其他圖片或文件時，音樂會保留播放時間、播放／暫停、音量與靜音狀態；切換至影片時自動暫停背景音樂。
+- 音樂自然播完後會略過非音訊項目，自動跳到下一首並依目前清單順序循環播放。
+- 柱狀頻譜採 32768 點浮點 dB FFT 與對數中心頻率插值；取樣率允許時涵蓋 18 Hz–24 kHz。
+- 音訊支援 MP2／MP3、M4A／M4B／ALAC、WAV、AAC、FLAC、OGG／OPUS、AIFF、CAF、WMA、APE、WavPack、AC-3、AMR 與 MKA。
+- FLAC 優先使用 WebKit 原生解碼；若原生解碼失敗，會自動建立暫存 M4A 相容檔。
+- 安裝本機 `ffmpeg` 後，可將 MKV 自動轉封裝或轉碼為暫存 MP4 播放。
 - 自動配對同目錄的 VTT、SRT、ASS、SSA、SMI 與文字型 SUB 字幕。
+- 在「下載項目」貼上或拖入公開 HTTP/HTTPS 網址，自動下載圖片、影片、文章與一般檔案；可直接存取的影片頁會解析 HTML／內嵌腳本中的 `.m3u8`。
+- 影片頁只有一個 `.m3u8` 時自動下載；找到多個時顯示複選對話框，每個選項建立獨立下載項目。
+- 支援未加密、已結束的 `.m3u8` VOD；主播放清單會選擇最高頻寬版本並合併媒體片段。
 - 可分別設定要掃描的圖片、文件、影音及字幕格式。
 - 三區式內容工作區、持久化釘選目錄、批次載入及可取消作業。
 - 跨資料夾與壓縮檔多選匯出、SHA-256 檢查及完全重複檔案偵測。
@@ -36,6 +45,7 @@
 - Node.js 與 npm
 - Xcode Command Line Tools
 - `rsync`
+- `ffmpeg`（選用，MKV 與非原生音訊相容播放需要，可用 `brew install ffmpeg` 安裝）
 
 建置腳本會使用 `go.mod` 指定的 Wails v2 版本。
 
@@ -77,7 +87,14 @@ build/bin/FastFileViewer.app
 
 ## 資料與隱私
 
-- 所有內容處理均在本機完成。
+- 檔案掃描、Render、縮圖、媒體播放與內容分析均在本機完成。
+- 只有使用者在「下載項目」明確貼上或拖入網址時，App 才會對該公開 HTTP/HTTPS 位址建立連出連線。
+- 下載器不使用瀏覽器 Cookie、登入狀態或自訂認證，不支援 DRM、付費牆、加密 HLS 或即時 HLS。
+- 網頁解析器不執行 JavaScript，只檢查最多 32 MB 的 HTML 與內嵌腳本文字；最多列出 16 個 `.m3u8` 候選。
+- 需要瀏覽器 Cookie、登入或反機器人驗證的網站不會繞過保護，介面會提示改貼直接 `.m3u8` 網址。
+- 下載內嵌串流時只傳送由來源頁推導、已移除 query 與 fragment 的 Referer／Origin。
+- 下載器拒絕 localhost、私有 IP、link-local 與其他非公開網路位址，重新導向也會再次驗證。
+- 下載內容上限為單檔 4 GB，文字／HTML 與播放清單上限為 32 MB，檔案儲存於 `~/Downloads/FastFileViewer`。
 - App 不執行顯示的程式碼或 Markdown 原始 HTML。
 - Markdown 不載入遠端圖片或連結資源。
 - 目錄索引與縮圖位於 `os.UserCacheDir()` 下的 `FastFileViewer` 目錄。

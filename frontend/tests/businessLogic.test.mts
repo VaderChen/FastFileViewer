@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseDelimitedText, parseJsonDocument } from '../src/structuredData.ts';
 import { filterWorkspaceEntries } from '../src/workspaceFilters.ts';
-import { convertSubtitleToWebVTT, findSidecarSubtitle, subtitleLanguageFromName } from '../src/mediaSupport.ts';
+import { calculateLogSpectrumAmplitudes, convertSubtitleToWebVTT, findNextAudioEntry, findSidecarSubtitle, subtitleLanguageFromName } from '../src/mediaSupport.ts';
 
 test('parses quoted CSV cells and embedded newlines', () => {
   const parsed = parseDelimitedText('name,note\r\nAlice,"hello, world"\r\nBob,"line 1\nline 2"', ',');
@@ -54,4 +54,44 @@ test('converts common subtitle formats to WebVTT', () => {
 
   const microDVD = convertSubtitleToWebVTT('{25}{50}First|Second', '.sub');
   assert.match(microDVD ?? '', /00:00:01\.000 --> 00:00:02\.000/);
+});
+
+test('maps low-frequency music energy across logarithmic spectrum bars', () => {
+  const frequencyData = new Float32Array(16_384).fill(-90);
+  frequencyData.fill(-28, 12, 683);
+  const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, 48_000, 32_768, 72, false);
+  assert.equal(amplitudes.length, 72);
+  assert.ok(amplitudes.every((value) => Number.isFinite(value) && value >= 0 && value <= 1));
+  assert.ok(amplitudes.filter((value) => value > 0.08).length > 20);
+});
+
+test('covers logarithmic spectrum from 18 Hz through 24 kHz when available', () => {
+  const frequencyData = new Float32Array(16_384).fill(-90);
+  const sampleRate = 48_000;
+  const fftSize = 32_768;
+  const binFrequency = sampleRate / fftSize;
+  const extendedHighStart = Math.floor(23_900 / binFrequency);
+  frequencyData.fill(-24, extendedHighStart);
+  const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, sampleRate, fftSize, 72, false);
+  assert.ok(amplitudes.slice(-4).some((value) => value > 0.08));
+});
+
+test('does not reuse the same resolved FFT bin across adjacent low-frequency bars', () => {
+  const frequencyData = new Float32Array(16_384).fill(-90);
+  frequencyData[13] = -10;
+  const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, 48_000, 32_768, 72, false);
+  assert.ok(amplitudes[0] > 0);
+  assert.ok(amplitudes[1] > 0);
+  assert.notEqual(amplitudes[0], amplitudes[1]);
+});
+
+test('advances to the next audio entry while skipping other file kinds', () => {
+  const entries = [
+    { id: 'song-1', name: 'first.flac', path: '/first.flac', directoryPath: '/', source: 'file', format: '.flac', kind: 'audio', size: 1 },
+    { id: 'image', name: 'cover.png', path: '/cover.png', directoryPath: '/', source: 'file', format: '.png', kind: 'image', size: 1 },
+    { id: 'song-2', name: 'second.mp3', path: '/second.mp3', directoryPath: '/', source: 'file', format: '.mp3', kind: 'audio', size: 1 },
+  ] as const;
+  assert.equal(findNextAudioEntry([...entries], 'song-1')?.id, 'song-2');
+  assert.equal(findNextAudioEntry([...entries], 'song-2')?.id, 'song-1');
+  assert.equal(findNextAudioEntry([entries[0]], 'song-1'), null);
 });

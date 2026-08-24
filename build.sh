@@ -98,7 +98,7 @@ if [[ ! -x "$WAILS_BIN" ]]; then
 fi
 
 echo "依 package-lock.json 安裝前端依賴..."
-if [[ ! -d "$FRONTEND_INSTALL_DIR/node_modules" || "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_DIR/package-lock.json" ]]; then
+if [[ ! -x "$FRONTEND_INSTALL_DIR/node_modules/.bin/tsc" || ! -f "$FRONTEND_INSTALL_DIR/package-lock.json" || "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_DIR/package-lock.json" ]]; then
   rm -rf "$FRONTEND_INSTALL_DIR"
   mkdir -p "$FRONTEND_INSTALL_DIR"
   cp "$FRONTEND_DIR/package.json" "$FRONTEND_DIR/package-lock.json" "$FRONTEND_INSTALL_DIR/"

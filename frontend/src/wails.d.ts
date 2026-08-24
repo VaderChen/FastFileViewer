@@ -1,4 +1,4 @@
-import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DuplicateGroup, ExportResult, ImageEntry, ImagePayload } from './types';
+import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DownloadItem, DownloadResolution, DuplicateGroup, ExportResult, ImageEntry, ImagePayload } from './types';
 
 declare global {
   interface Window {
@@ -21,9 +21,18 @@ declare global {
           LoadImageByPathWithOperation: (filePath: string, operationId: number) => Promise<ImagePayload>;
           LoadDocumentByPath: (filePath: string) => Promise<DocumentPayload>;
           PrepareMediaByPath: (filePath: string) => Promise<string>;
+          PrepareCompatibleMediaByPath: (filePath: string) => Promise<string>;
           LoadThumbnailByPath: (filePath: string, maxDimension: number) => Promise<ImagePayload>;
           ExportImages: (images: ImageEntry[], dialogTitle: string, operationId: number) => Promise<ExportResult>;
           DetectDuplicates: (images: ImageEntry[], operationId: number) => Promise<DuplicateGroup[]>;
+          StartDownload: (url: string) => Promise<DownloadItem>;
+          ResolveDownloadURL: (url: string) => Promise<DownloadResolution>;
+          StartResolvedDownload: (sourceUrl: string, hlsUrl: string, preferredName: string) => Promise<DownloadItem>;
+          ListDownloads: () => Promise<DownloadItem[]>;
+          CancelDownload: (id: string) => Promise<void>;
+          RemoveDownload: (id: string) => Promise<void>;
+          RevealDownload: (id: string) => Promise<void>;
+          OpenDownloadsDirectory: () => Promise<void>;
         };
       };
     };

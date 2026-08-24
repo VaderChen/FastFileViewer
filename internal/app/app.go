@@ -162,7 +162,8 @@ var supportedDocumentExtensions = []string{
 
 var supportedMediaExtensions = []string{
 	".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".m2ts",
-	".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".oga", ".opus",
+	".mp3", ".mp2", ".m4a", ".m4b", ".wav", ".aac", ".flac", ".ogg", ".oga", ".opus",
+	".aif", ".aiff", ".aifc", ".caf", ".wma", ".ape", ".wv", ".alac", ".ac3", ".amr", ".mka",
 	".srt", ".vtt", ".ass", ".ssa", ".sub", ".smi",
 }
 
@@ -185,6 +186,12 @@ type App struct {
 	operationMu     sync.Mutex
 	operations      map[int64]operationState
 	nextOperationID atomic.Int64
+	downloadMu      sync.Mutex
+	downloadPersist sync.Mutex
+	downloads       map[string]*DownloadItem
+	downloadOrder   []string
+	downloadCancels map[string]context.CancelFunc
+	nextDownloadID  atomic.Int64
 }
 
 type operationState struct {
@@ -197,11 +204,14 @@ func New() *App {
 		lastImages:      make(map[string]ImageEntry),
 		mediaCacheFiles: make(map[string]string),
 		operations:      make(map[int64]operationState),
+		downloads:       make(map[string]*DownloadItem),
+		downloadCancels: make(map[string]context.CancelFunc),
 	}
 }
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	a.loadDownloads()
 }
 
 func (a *App) BeginOperation() int64 {
@@ -1770,9 +1780,9 @@ func mimeByExtension(extension string) string {
 		return "video/x-msvideo"
 	case ".m2ts":
 		return "video/mp2t"
-	case ".mp3":
+	case ".mp3", ".mp2":
 		return "audio/mpeg"
-	case ".m4a":
+	case ".m4a", ".m4b":
 		return "audio/mp4"
 	case ".wav":
 		return "audio/wav"
@@ -1784,6 +1794,24 @@ func mimeByExtension(extension string) string {
 		return "audio/ogg"
 	case ".opus":
 		return "audio/opus"
+	case ".aif", ".aiff", ".aifc":
+		return "audio/aiff"
+	case ".caf":
+		return "audio/x-caf"
+	case ".wma":
+		return "audio/x-ms-wma"
+	case ".ape":
+		return "audio/ape"
+	case ".wv":
+		return "audio/wavpack"
+	case ".alac":
+		return "audio/alac"
+	case ".ac3":
+		return "audio/ac3"
+	case ".amr":
+		return "audio/amr"
+	case ".mka":
+		return "audio/x-matroska"
 	case ".vtt":
 		return "text/vtt"
 	case ".srt", ".ass", ".ssa", ".sub", ".smi":

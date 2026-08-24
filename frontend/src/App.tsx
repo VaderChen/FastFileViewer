@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, MouseEvent } from 'react';
+import type { ClipboardEvent, CSSProperties, DragEvent, MouseEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -20,6 +20,8 @@ import {
   faCheck,
   faClone,
   faCompress,
+  faCircleCheck,
+  faDownload,
   faExpand,
   faFileExport,
   faFileLines,
@@ -27,6 +29,7 @@ import {
   faFolderOpen,
   faGear,
   faImage,
+  faLink,
   faMinus,
   faMagnifyingGlass,
   faPlus,
@@ -35,23 +38,25 @@ import {
   faStop,
   faTableCellsLarge,
   faThumbtack,
+  faTrashCan,
+  faTriangleExclamation,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { ClipboardSetText, WindowFullscreen, WindowIsFullscreen, WindowSetTitle, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
 import { isMediaKind, isPlaybackMediaKind } from './types';
-import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DuplicateGroup, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ViewerMode, ZoomBehavior } from './types';
+import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadItem, DownloadResolution, DownloadStatus, DuplicateGroup, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ViewerMode, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
 import { filterWorkspaceEntries } from './workspaceFilters';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
 import { MediaPlayer } from './MediaPlayer';
-import { findSidecarSubtitle } from './mediaSupport';
+import { findNextAudioEntry, findSidecarSubtitle } from './mediaSupport';
 
 const fallbackBootstrap: BootstrapPayload = {
   defaultPath: '',
   supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic'],
   supportedDocuments: ['.txt', '.md', '.markdown'],
-  supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
+  supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.mp2', '.m4a', '.m4b', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.aif', '.aiff', '.aifc', '.caf', '.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
   supportedPacks: ['.zip', '.tar', '.tgz', '.tar.gz'],
 };
 
@@ -123,6 +128,10 @@ const messages = {
     mediaSubtitlesOn: '開啟字幕',
     mediaSubtitlesOff: '關閉字幕',
     mediaSeek: '播放進度',
+    musicVisualizer: '音樂頻譜視覺化',
+    musicSpectrum: '柱狀頻譜',
+    musicWaveform: '波形',
+    musicVisualizationBoth: '全部顯示',
     noImage: '未選擇內容',
     selectPathFirst: '請先選擇或輸入圖片目錄',
     operationFailed: '操作失敗',
@@ -165,6 +174,27 @@ const messages = {
     copyPath: '複製路徑',
     pinnedDirectories: '釘選目錄',
     currentDirectory: '當前目錄',
+    downloads: '下載項目',
+    downloadsHint: '貼上或拖入公開網址；影片頁會自動解析 .m3u8，亦可下載圖片、文章與檔案',
+    downloadURLPlaceholder: '貼上影片、圖片、文章或 .m3u8 網址',
+    startDownload: '開始下載',
+    openDownloadsFolder: '開啟下載資料夾',
+    downloadDropHint: '將網址拖放到這裡',
+    downloadLocation: '儲存於 ~/Downloads/FastFileViewer',
+    noDownloads: '尚無下載項目',
+    downloadQueued: '等待中',
+    downloadDownloading: '下載中',
+    downloadCompleted: '已完成',
+    downloadFailed: '失敗',
+    downloadCancelled: '已取消',
+    cancelDownload: '取消下載',
+    removeDownload: '移除紀錄',
+    revealDownload: '在 Finder 顯示',
+    multipleStreamsFound: '找到多個影片串流',
+    selectStreamsHint: '請複選要下載的 .m3u8；每個選項會建立獨立下載項目。',
+    streamCount: '個串流',
+    downloadSelected: '下載選取項目',
+    skipSelection: '略過此頁',
     noPinnedDirectories: '尚未釘選目錄',
     pinDirectory: '釘選目錄',
     unpinDirectory: '取消釘選',
@@ -259,6 +289,10 @@ const messages = {
     mediaSubtitlesOn: 'Turn subtitles on',
     mediaSubtitlesOff: 'Turn subtitles off',
     mediaSeek: 'Playback position',
+    musicVisualizer: 'Music spectrum visualizer',
+    musicSpectrum: 'Spectrum bars',
+    musicWaveform: 'Waveform',
+    musicVisualizationBoth: 'Show both',
     noImage: 'No content selected',
     selectPathFirst: 'Choose or enter a folder first',
     operationFailed: 'Operation failed',
@@ -301,6 +335,27 @@ const messages = {
     copyPath: 'Copy path',
     pinnedDirectories: 'Pinned folders',
     currentDirectory: 'Current folder',
+    downloads: 'Downloads',
+    downloadsHint: 'Paste or drop a public URL; video pages resolve .m3u8 automatically, while images, articles, and files download directly',
+    downloadURLPlaceholder: 'Paste a video, image, article, or .m3u8 URL',
+    startDownload: 'Start download',
+    openDownloadsFolder: 'Open downloads folder',
+    downloadDropHint: 'Drop URLs here',
+    downloadLocation: 'Saved to ~/Downloads/FastFileViewer',
+    noDownloads: 'No downloads yet',
+    downloadQueued: 'Queued',
+    downloadDownloading: 'Downloading',
+    downloadCompleted: 'Completed',
+    downloadFailed: 'Failed',
+    downloadCancelled: 'Cancelled',
+    cancelDownload: 'Cancel download',
+    removeDownload: 'Remove record',
+    revealDownload: 'Show in Finder',
+    multipleStreamsFound: 'Multiple video streams found',
+    selectStreamsHint: 'Select one or more .m3u8 streams. Each selection creates a separate download.',
+    streamCount: 'streams',
+    downloadSelected: 'Download selected',
+    skipSelection: 'Skip this page',
     noPinnedDirectories: 'No pinned folders',
     pinDirectory: 'Pin folder',
     unpinDirectory: 'Unpin folder',
@@ -395,6 +450,10 @@ const messages = {
     mediaSubtitlesOn: '字幕をオン',
     mediaSubtitlesOff: '字幕をオフ',
     mediaSeek: '再生位置',
+    musicVisualizer: '音楽スペクトラム表示',
+    musicSpectrum: 'スペクトラム',
+    musicWaveform: '波形',
+    musicVisualizationBoth: '両方表示',
     noImage: 'コンテンツ未選択',
     selectPathFirst: '先にフォルダを選択または入力してください',
     operationFailed: '操作に失敗しました',
@@ -437,6 +496,27 @@ const messages = {
     copyPath: 'パスをコピー',
     pinnedDirectories: 'ピン留めフォルダ',
     currentDirectory: '現在のフォルダ',
+    downloads: 'ダウンロード',
+    downloadsHint: '公開 URL を貼り付けるかドロップ。動画ページは .m3u8 を自動解析し、画像・記事・ファイルは直接保存します',
+    downloadURLPlaceholder: '動画、画像、記事、または .m3u8 URL を貼り付け',
+    startDownload: 'ダウンロード開始',
+    openDownloadsFolder: 'ダウンロードフォルダを開く',
+    downloadDropHint: 'URL をここにドロップ',
+    downloadLocation: '~/Downloads/FastFileViewer に保存',
+    noDownloads: 'ダウンロード項目はありません',
+    downloadQueued: '待機中',
+    downloadDownloading: 'ダウンロード中',
+    downloadCompleted: '完了',
+    downloadFailed: '失敗',
+    downloadCancelled: 'キャンセル済み',
+    cancelDownload: 'ダウンロードをキャンセル',
+    removeDownload: '履歴を削除',
+    revealDownload: 'Finder に表示',
+    multipleStreamsFound: '複数の動画ストリームが見つかりました',
+    selectStreamsHint: 'ダウンロードする .m3u8 を複数選択できます。各項目は個別のダウンロードになります。',
+    streamCount: 'ストリーム',
+    downloadSelected: '選択項目をダウンロード',
+    skipSelection: 'このページをスキップ',
     noPinnedDirectories: 'ピン留めフォルダはありません',
     pinDirectory: 'フォルダをピン留め',
     unpinDirectory: 'ピン留めを解除',
@@ -589,6 +669,7 @@ export default function App() {
   const [imagePayload, setImagePayload] = useState<ImagePayload | null>(null);
   const [documentPayload, setDocumentPayload] = useState<DocumentPayload | null>(null);
   const [documentViewMode, setDocumentViewMode] = useState<'preview' | 'raw'>('preview');
+  const [retainedAudioEntry, setRetainedAudioEntry] = useState<ImageEntry | null>(null);
   const [viewerMode, setViewerMode] = useState<ViewerMode>('fit');
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -610,7 +691,17 @@ export default function App() {
   });
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => localStorage.getItem(storageKeys.libraryCollapsed) === 'true');
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>(readPinnedDirectories);
-  const [librarySourceTab, setLibrarySourceTab] = useState<'current' | 'pinned'>(() => localStorage.getItem(storageKeys.librarySourceTab) === 'pinned' ? 'pinned' : 'current');
+  const [librarySourceTab, setLibrarySourceTab] = useState<'current' | 'pinned' | 'downloads'>(() => {
+    const storedTab = localStorage.getItem(storageKeys.librarySourceTab);
+    return storedTab === 'pinned' || storedTab === 'downloads' ? storedTab : 'current';
+  });
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [downloadURL, setDownloadURL] = useState('');
+  const [downloadDragActive, setDownloadDragActive] = useState(false);
+  const [downloadSubmitting, setDownloadSubmitting] = useState(false);
+  const [pendingDownloadResolutions, setPendingDownloadResolutions] = useState<DownloadResolution[]>([]);
+  const [selectedHLSURLs, setSelectedHLSURLs] = useState<Set<string>>(new Set());
+  const [downloadSelectionSubmitting, setDownloadSelectionSubmitting] = useState(false);
   const [selectedWorkspaceImageIds, setSelectedWorkspaceImageIds] = useState<Set<string>>(new Set());
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
@@ -646,13 +737,26 @@ export default function App() {
 
   const t = messages[locale];
   const pinnedDirectorySet = useMemo(() => new Set(pinnedDirectories), [pinnedDirectories]);
+  const currentDownloadResolution = pendingDownloadResolutions[0] ?? null;
 
   useEffect(() => {
     WindowSetTitle(t.appName);
   }, [t.appName]);
 
+  useEffect(() => {
+    const firstCandidate = currentDownloadResolution?.candidates[0];
+    setSelectedHLSURLs(new Set(firstCandidate ? [firstCandidate.url] : []));
+  }, [currentDownloadResolution]);
+
   const closeContextMenu = () => {
     setContextMenu(null);
+  };
+
+  const refreshDownloads = async () => {
+    const items = await window.go?.app?.App?.ListDownloads?.();
+    if (items) {
+      setDownloads(items);
+    }
   };
 
   useEffect(() => {
@@ -761,6 +865,21 @@ export default function App() {
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    void refreshDownloads().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const hasActiveDownload = downloads.some((item) => item.status === 'queued' || item.status === 'downloading');
+    if (librarySourceTab !== 'downloads' && !hasActiveDownload) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshDownloads().catch(() => undefined);
+    }, 750);
+    return () => window.clearInterval(timer);
+  }, [downloads, librarySourceTab]);
 
   useEffect(() => {
     if (rootPath.trim()) {
@@ -1164,6 +1283,142 @@ export default function App() {
     void handleScan(directoryPath);
   };
 
+  const submitDownloadURLs = async (rawValues: string[]) => {
+    const urls = Array.from(new Set(rawValues.flatMap(extractDownloadURLs)));
+    if (urls.length === 0 || downloadSubmitting) {
+      return;
+    }
+    setDownloadSubmitting(true);
+    setErrorMessage('');
+    const failures: string[] = [];
+    const resolutionsForSelection: DownloadResolution[] = [];
+    for (const url of urls) {
+      try {
+        if (shouldResolveDownloadPage(url) && window.go?.app?.App?.ResolveDownloadURL) {
+          const resolution = await window.go.app.App.ResolveDownloadURL(url);
+          if (resolution.candidates.length > 1) {
+            resolutionsForSelection.push(resolution);
+            continue;
+          }
+          if (resolution.candidates.length === 1 && window.go.app.App.StartResolvedDownload) {
+            await window.go.app.App.StartResolvedDownload(resolution.sourceUrl, resolution.candidates[0].url, resolution.name);
+            continue;
+          }
+        }
+        await window.go?.app?.App?.StartDownload?.(url);
+      } catch (error) {
+        failures.push(extractErrorMessage(error, t.operationFailed));
+      }
+    }
+    if (resolutionsForSelection.length > 0) {
+      setPendingDownloadResolutions((current) => [...current, ...resolutionsForSelection]);
+    }
+    await refreshDownloads().catch(() => undefined);
+    setDownloadSubmitting(false);
+    setDownloadURL('');
+    if (failures.length > 0) {
+      setErrorMessage(failures.join('\n'));
+    }
+  };
+
+  const toggleHLSSelection = (url: string) => {
+    setSelectedHLSURLs((current) => {
+      const next = new Set(current);
+      if (next.has(url)) {
+        next.delete(url);
+      } else {
+        next.add(url);
+      }
+      return next;
+    });
+  };
+
+  const closeCurrentDownloadResolution = () => {
+    if (downloadSelectionSubmitting) {
+      return;
+    }
+    setPendingDownloadResolutions((current) => current.slice(1));
+  };
+
+  const confirmHLSSelection = async () => {
+    if (!currentDownloadResolution || selectedHLSURLs.size === 0 || downloadSelectionSubmitting) {
+      return;
+    }
+    setDownloadSelectionSubmitting(true);
+    setErrorMessage('');
+    const failures: string[] = [];
+    for (const candidate of currentDownloadResolution.candidates) {
+      if (!selectedHLSURLs.has(candidate.url)) {
+        continue;
+      }
+      try {
+        await window.go?.app?.App?.StartResolvedDownload?.(
+          currentDownloadResolution.sourceUrl,
+          candidate.url,
+          currentDownloadResolution.name,
+        );
+      } catch (error) {
+        failures.push(extractErrorMessage(error, t.operationFailed));
+      }
+    }
+    await refreshDownloads().catch(() => undefined);
+    setDownloadSelectionSubmitting(false);
+    setPendingDownloadResolutions((current) => current.slice(1));
+    if (failures.length > 0) {
+      setErrorMessage(failures.join('\n'));
+    }
+  };
+
+  const handleDownloadPaste = (event: ClipboardEvent<HTMLElement>) => {
+    const value = event.clipboardData.getData('text/uri-list') || event.clipboardData.getData('text/plain');
+    if (extractDownloadURLs(value).length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void submitDownloadURLs([value]);
+  };
+
+  const handleDownloadDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).some((type) => type === 'text/uri-list' || type === 'text/plain')) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDownloadDragActive(true);
+  };
+
+  const handleDownloadDrop = (event: DragEvent<HTMLElement>) => {
+    const value = event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain');
+    setDownloadDragActive(false);
+    if (extractDownloadURLs(value).length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void submitDownloadURLs([value]);
+  };
+
+  const cancelDownload = async (id: string) => {
+    await window.go?.app?.App?.CancelDownload?.(id);
+    await refreshDownloads().catch(() => undefined);
+  };
+
+  const removeDownload = async (id: string) => {
+    try {
+      await window.go?.app?.App?.RemoveDownload?.(id);
+      await refreshDownloads();
+    } catch (error) {
+      setErrorMessage(extractErrorMessage(error, t.operationFailed));
+    }
+  };
+
+  const revealDownload = async (id: string) => {
+    try {
+      await window.go?.app?.App?.RevealDownload?.(id);
+    } catch (error) {
+      setErrorMessage(extractErrorMessage(error, t.operationFailed));
+    }
+  };
+
   const handleStopScan = () => {
     scanTokenRef.current += 1;
     if (scanOperationRef.current !== null) {
@@ -1286,6 +1541,20 @@ export default function App() {
     const nextItem = navigationImages[nextIndex];
     setSelectedNodeId(nextItem.node.id);
     setSelectedImageId(nextItem.image.id);
+  };
+
+  const moveToNextAudio = (currentAudioId: string): boolean => {
+    const nextAudio = findNextAudioEntry(navigationImages.map((item) => item.image), currentAudioId);
+    if (!nextAudio) {
+      return false;
+    }
+    const nextItem = navigationImages.find((item) => item.image.id === nextAudio.id);
+    if (!nextItem) {
+      return false;
+    }
+    setSelectedNodeId(nextItem.node.id);
+    setSelectedImageId(nextItem.image.id);
+    return true;
   };
 
   const copyText = (value: string) => {
@@ -1756,6 +2025,23 @@ export default function App() {
   const activeIsImage = activeImage?.kind === 'image';
   const activeIsSubtitle = activeImage?.kind === 'subtitle';
   const activeIsMedia = activeImage ? isPlaybackMediaKind(activeImage.kind) : false;
+  const activeAudioEntry = activeImage?.kind === 'audio' ? activeImage : null;
+  const persistentAudioEntry = activeAudioEntry ?? retainedAudioEntry;
+  const persistentAudioVisible = Boolean(activeAudioEntry && persistentAudioEntry?.id === activeAudioEntry.id);
+  useEffect(() => {
+    if (activeAudioEntry) {
+      setRetainedAudioEntry(activeAudioEntry);
+    }
+  }, [activeAudioEntry]);
+  useEffect(() => {
+    setRetainedAudioEntry((current) => {
+      if (!current) {
+        return null;
+      }
+      const refreshedEntry = allLibraryImages.find((entry) => entry.id === current.id);
+      return refreshedEntry?.kind === 'audio' ? refreshedEntry : null;
+    });
+  }, [allLibraryImages]);
   const activeSubtitle = useMemo(
     () => activeImage && activeImage.kind === 'video' ? findSidecarSubtitle(activeImage, allLibraryImages) : null,
     [activeImage, allLibraryImages],
@@ -1766,6 +2052,25 @@ export default function App() {
   const totalArchives = displayTree ? countArchives(displayTree) : 0;
   const imageDisplayStyle = buildImageDisplayStyle(viewerMode, zoomBehavior, imageNaturalSize, stageSize, zoom, rotation);
   const displayZoom = viewerMode === 'fit' ? calculateViewportScale(imageNaturalSize, stageSize, zoomBehavior) * zoom : zoom;
+  const mediaPlayerLabels = {
+    loading: t.loadingMedia,
+    playbackFailed: t.mediaPlaybackFailed,
+    subtitleFailed: t.subtitleFailed,
+    play: t.mediaPlay,
+    pause: t.mediaPause,
+    backward: t.mediaBackward,
+    forward: t.mediaForward,
+    mute: t.mediaMute,
+    unmute: t.mediaUnmute,
+    subtitlesOn: t.mediaSubtitlesOn,
+    subtitlesOff: t.mediaSubtitlesOff,
+    fullscreen: t.fullscreen,
+    seek: t.mediaSeek,
+    visualizer: t.musicVisualizer,
+    spectrum: t.musicSpectrum,
+    waveform: t.musicWaveform,
+    bothVisualizations: t.musicVisualizationBoth,
+  };
 
   const shellStyle = { '--library-width': `${libraryWidth}px` } as CSSProperties;
 
@@ -1858,10 +2163,120 @@ export default function App() {
             <span>{t.pinnedDirectories}</span>
             {pinnedDirectories.length > 0 ? <em>{pinnedDirectories.length}</em> : null}
           </button>
+          <button className={librarySourceTab === 'downloads' ? 'active' : ''} type="button" role="tab" aria-selected={librarySourceTab === 'downloads'} onClick={() => setLibrarySourceTab('downloads')}>
+            <FontAwesomeIcon icon={faDownload} />
+            <span>{t.downloads}</span>
+            {downloads.length > 0 ? <em>{downloads.length}</em> : null}
+          </button>
         </div>
 
-        <div className="tree-scroll">
-          {librarySourceTab === 'pinned' ? (
+        <div className={`tree-scroll ${librarySourceTab === 'downloads' ? 'downloads-scroll' : ''}`}>
+          {librarySourceTab === 'downloads' ? (
+            <section
+              className={`downloads-panel ${downloadDragActive ? 'drag-active' : ''}`}
+              aria-label={t.downloads}
+              onPaste={handleDownloadPaste}
+              onDragOver={handleDownloadDragOver}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setDownloadDragActive(false);
+                }
+              }}
+              onDrop={handleDownloadDrop}
+            >
+              <header className="downloads-header">
+                <div>
+                  <strong>{t.downloads}</strong>
+                  <span>{t.downloadsHint}</span>
+                </div>
+                <button className="icon-button" type="button" title={t.openDownloadsFolder} onClick={() => void window.go?.app?.App?.OpenDownloadsDirectory?.()}>
+                  <FontAwesomeIcon icon={faFolderOpen} />
+                </button>
+              </header>
+              <form
+                className="download-url-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitDownloadURLs([downloadURL]);
+                }}
+              >
+                <label>
+                  <FontAwesomeIcon icon={faLink} />
+                  <input
+                    value={downloadURL}
+                    onChange={(event) => setDownloadURL(event.target.value)}
+                    placeholder={t.downloadURLPlaceholder}
+                    spellCheck={false}
+                    inputMode="url"
+                  />
+                </label>
+                <button type="submit" disabled={downloadSubmitting || extractDownloadURLs(downloadURL).length === 0}>
+                  <FontAwesomeIcon icon={downloadSubmitting ? faSpinner : faDownload} spin={downloadSubmitting} />
+                  <span>{t.startDownload}</span>
+                </button>
+              </form>
+              <div className="download-drop-zone">
+                <FontAwesomeIcon icon={faDownload} />
+                <span>{downloadDragActive ? t.downloadDropHint : t.downloadLocation}</span>
+              </div>
+              {downloads.length > 0 ? (
+                <div className="download-list">
+                  {downloads.map((item) => {
+                    const active = item.status === 'queued' || item.status === 'downloading';
+                    const statusIcon = item.status === 'completed'
+                      ? faCircleCheck
+                      : item.status === 'failed'
+                        ? faTriangleExclamation
+                        : item.status === 'cancelled'
+                          ? faStop
+                          : faSpinner;
+                    return (
+                      <article className={`download-item status-${item.status}`} key={item.id}>
+                        <div className="download-item-title">
+                          <FontAwesomeIcon icon={statusIcon} spin={active} />
+                          <div>
+                            <strong title={item.name}>{item.name}</strong>
+                            <span title={item.url}>{downloadHost(item.url)}</span>
+                          </div>
+                        </div>
+                        {active ? (
+                          <progress value={item.totalBytes > 0 ? item.bytes : undefined} max={item.totalBytes > 0 ? item.totalBytes : undefined} />
+                        ) : null}
+                        <div className="download-item-meta">
+                          <span>{downloadStatusLabel(item.status, t)}</span>
+                          <span>{formatDownloadSize(item.bytes)}{item.totalBytes > 0 ? ` / ${formatDownloadSize(item.totalBytes)}` : ''}</span>
+                        </div>
+                        {item.error ? <p title={item.error}>{item.error}</p> : null}
+                        {item.path ? <small title={item.path}>{item.path}</small> : null}
+                        <div className="download-item-actions">
+                          {active ? (
+                            <button type="button" onClick={() => void cancelDownload(item.id)}>
+                              <FontAwesomeIcon icon={faStop} />
+                              <span>{t.cancelDownload}</span>
+                            </button>
+                          ) : null}
+                          {item.status === 'completed' ? (
+                            <button type="button" onClick={() => void revealDownload(item.id)}>
+                              <FontAwesomeIcon icon={faFolderOpen} />
+                              <span>{t.revealDownload}</span>
+                            </button>
+                          ) : null}
+                          {!active ? (
+                            <button type="button" onClick={() => void removeDownload(item.id)}>
+                              <FontAwesomeIcon icon={faTrashCan} />
+                              <span>{t.removeDownload}</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-state compact"><FontAwesomeIcon icon={faDownload} /><span>{t.noDownloads}</span></div>
+              )}
+            </section>
+          ) : librarySourceTab === 'pinned' ? (
             pinnedDirectories.length > 0 ? (
               <section className="pinned-directories pinned-tab-content" aria-label={t.pinnedDirectories}>
                 <div className="pinned-directory-list">
@@ -1991,6 +2406,18 @@ export default function App() {
           onWheel={activeIsImage ? handleWheelNavigation : undefined}
           onContextMenu={openViewerContextMenu}
         >
+          {persistentAudioEntry ? (
+            <div className="persistent-audio-player" hidden={!persistentAudioVisible}>
+              <MediaPlayer
+                entry={persistentAudioEntry}
+                subtitle={null}
+                labels={mediaPlayerLabels}
+                visible={persistentAudioVisible}
+                pausePlayback={activeImage?.kind === 'video'}
+                onAudioEnded={() => moveToNextAudio(persistentAudioEntry.id)}
+              />
+            </div>
+          ) : null}
           {loadingImage ? (
             <div className="empty-state">
               <FontAwesomeIcon icon={faSpinner} spin />
@@ -2058,27 +2485,13 @@ export default function App() {
                 <CodeHighlight code={documentPayload.text} language={languageByFormat(documentPayload.format)} truncatedLabel={t.previewTruncated} />
               )}
             </article>
-          ) : activeIsMedia ? (
+          ) : activeImage?.kind === 'video' ? (
             <MediaPlayer
-              entry={activeImage!}
+              entry={activeImage}
               subtitle={activeSubtitle}
-              labels={{
-                loading: t.loadingMedia,
-                playbackFailed: t.mediaPlaybackFailed,
-                subtitleFailed: t.subtitleFailed,
-                play: t.mediaPlay,
-                pause: t.mediaPause,
-                backward: t.mediaBackward,
-                forward: t.mediaForward,
-                mute: t.mediaMute,
-                unmute: t.mediaUnmute,
-                subtitlesOn: t.mediaSubtitlesOn,
-                subtitlesOff: t.mediaSubtitlesOff,
-                fullscreen: t.fullscreen,
-                seek: t.mediaSeek,
-              }}
+              labels={mediaPlayerLabels}
             />
-          ) : imagePayload ? (
+          ) : activeAudioEntry ? null : imagePayload ? (
             <img
               src={imagePayload.dataUri}
               alt={imagePayload.name}
@@ -2296,6 +2709,59 @@ export default function App() {
               <FontAwesomeIcon icon={faStop} />
               {t.cancelOperation}
             </button>
+          </section>
+        </div>
+      ) : null}
+      {currentDownloadResolution ? (
+        <div className="download-selection-overlay" onMouseDown={closeCurrentDownloadResolution}>
+          <section
+            className="download-selection-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.multipleStreamsFound}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <FontAwesomeIcon icon={faDownload} />
+                <span>
+                  <strong>{t.multipleStreamsFound}</strong>
+                  <small>{currentDownloadResolution.candidates.length} {t.streamCount}</small>
+                </span>
+              </div>
+              <button className="icon-button" type="button" title={t.close} disabled={downloadSelectionSubmitting} onClick={closeCurrentDownloadResolution}>
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </header>
+            <p>{t.selectStreamsHint}</p>
+            <small className="download-selection-source" title={currentDownloadResolution.sourceUrl}>{currentDownloadResolution.sourceUrl}</small>
+            <div className="download-selection-tools">
+              <button type="button" onClick={() => setSelectedHLSURLs(new Set(currentDownloadResolution.candidates.map((candidate) => candidate.url)))}>{t.selectAll}</button>
+              <button type="button" onClick={() => setSelectedHLSURLs(new Set())}>{t.clearAll}</button>
+            </div>
+            <div className="download-selection-list">
+              {currentDownloadResolution.candidates.map((candidate, index) => (
+                <label key={candidate.url}>
+                  <input
+                    type="checkbox"
+                    checked={selectedHLSURLs.has(candidate.url)}
+                    disabled={downloadSelectionSubmitting}
+                    onChange={() => toggleHLSSelection(candidate.url)}
+                  />
+                  <span>
+                    <strong>{index + 1}. {candidate.name || 'HLS'}</strong>
+                    <small title={candidate.url}>{downloadCandidateDisplayURL(candidate.url)}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <footer>
+              <button className="download-selection-skip" type="button" disabled={downloadSelectionSubmitting} onClick={closeCurrentDownloadResolution}>{t.skipSelection}</button>
+              <button className="download-selection-confirm" type="button" disabled={selectedHLSURLs.size === 0 || downloadSelectionSubmitting} onClick={() => void confirmHLSSelection()}>
+                <FontAwesomeIcon icon={downloadSelectionSubmitting ? faSpinner : faDownload} spin={downloadSelectionSubmitting} />
+                <span>{t.downloadSelected} ({selectedHLSURLs.size})</span>
+              </button>
+            </footer>
           </section>
         </div>
       ) : null}
@@ -3144,6 +3610,79 @@ function formatBytes(size: number): string {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function extractDownloadURLs(value: string): string[] {
+  const matches = value.match(/https?:\/\/[^\s<>"']+/gi) ?? [];
+  const urls: string[] = [];
+  for (const match of matches) {
+    const candidate = match.replace(/[.,;]+$/, '');
+    try {
+      const parsed = new URL(candidate);
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname) {
+        urls.push(parsed.toString());
+      }
+    } catch {
+      continue;
+    }
+  }
+  return urls;
+}
+
+function shouldResolveDownloadPage(rawURL: string): boolean {
+  try {
+    const parsed = new URL(rawURL);
+    const path = parsed.pathname.toLowerCase();
+    const filename = path.split('/').filter(Boolean).pop() ?? '';
+    const extensionMatch = filename.match(/(\.[a-z0-9]{1,10})$/);
+    if (!extensionMatch) {
+      return true;
+    }
+    return ['.html', '.htm', '.php', '.asp', '.aspx', '.jsp'].includes(extensionMatch[1]);
+  } catch {
+    return false;
+  }
+}
+
+function downloadCandidateDisplayURL(rawURL: string): string {
+  try {
+    const parsed = new URL(rawURL);
+    return `${parsed.hostname}${decodeURIComponent(parsed.pathname)}`;
+  } catch {
+    return rawURL;
+  }
+}
+
+function downloadHost(rawURL: string): string {
+  try {
+    return new URL(rawURL).hostname;
+  } catch {
+    return rawURL;
+  }
+}
+
+function downloadStatusLabel(status: DownloadStatus, labels: (typeof messages)[LocaleCode]): string {
+  const keys: Record<DownloadStatus, 'downloadQueued' | 'downloadDownloading' | 'downloadCompleted' | 'downloadFailed' | 'downloadCancelled'> = {
+    queued: 'downloadQueued',
+    downloading: 'downloadDownloading',
+    completed: 'downloadCompleted',
+    failed: 'downloadFailed',
+    cancelled: 'downloadCancelled',
+  };
+  return labels[keys[status]];
+}
+
+function formatDownloadSize(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 async function writeImagePayloadToClipboard(payload: ImagePayload): Promise<void> {

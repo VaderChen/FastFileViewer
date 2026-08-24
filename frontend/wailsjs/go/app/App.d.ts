@@ -8,6 +8,8 @@ export function Bootstrap():Promise<app.BootstrapPayload>;
 
 export function CalculateChecksum(arg1:app.ImageEntry,arg2:number):Promise<string>;
 
+export function CancelDownload(arg1:string):Promise<void>;
+
 export function CancelOperation(arg1:number):Promise<void>;
 
 export function DetectDuplicates(arg1:Array<app.ImageEntry>,arg2:number):Promise<Array<app.DuplicateGroup>>;
@@ -17,6 +19,8 @@ export function ExportImages(arg1:Array<app.ImageEntry>,arg2:string,arg3:number)
 export function FinishOperation(arg1:number):Promise<void>;
 
 export function GetAppInfo():Promise<app.AppInfo>;
+
+export function ListDownloads():Promise<Array<app.DownloadItem>>;
 
 export function LoadDocumentByPath(arg1:string):Promise<app.DocumentPayload>;
 
@@ -28,14 +32,28 @@ export function LoadImageByPathWithOperation(arg1:string,arg2:number):Promise<ap
 
 export function LoadLibraryCache(arg1:string):Promise<string>;
 
-export function PrepareMediaByPath(arg1:string):Promise<string>;
-
 export function LoadThumbnailByPath(arg1:string,arg2:number):Promise<app.ImagePayload>;
 
+export function OpenDownloadsDirectory():Promise<void>;
+
+export function PrepareCompatibleMediaByPath(arg1:string):Promise<string>;
+
+export function PrepareMediaByPath(arg1:string):Promise<string>;
+
+export function RemoveDownload(arg1:string):Promise<void>;
+
 export function ResetLibrary():Promise<void>;
+
+export function ResolveDownloadURL(arg1:string):Promise<app.DownloadResolution>;
+
+export function RevealDownload(arg1:string):Promise<void>;
 
 export function SaveLibraryCache(arg1:string,arg2:string):Promise<void>;
 
 export function ScanDirectory(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:number):Promise<app.DirectoryScanResult>;
 
 export function SelectDirectory(arg1:string):Promise<string>;
+
+export function StartDownload(arg1:string):Promise<app.DownloadItem>;
+
+export function StartResolvedDownload(arg1:string,arg2:string,arg3:string):Promise<app.DownloadItem>;

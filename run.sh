@@ -45,7 +45,7 @@ if [[ ! -x "$WAILS_BIN" ]]; then
   GOBIN="$(dirname "$WAILS_BIN")" GO111MODULE=on go install "github.com/wailsapp/wails/v2/cmd/wails@$WAILS_VERSION"
 fi
 
-if [[ ! -d "$FRONTEND_INSTALL_DIR/node_modules" || "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_DIR/package-lock.json" ]]; then
+if [[ ! -x "$FRONTEND_INSTALL_DIR/node_modules/.bin/tsc" || ! -f "$FRONTEND_INSTALL_DIR/package-lock.json" || "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_DIR/package-lock.json" ]]; then
   rm -rf "$FRONTEND_INSTALL_DIR"
   mkdir -p "$FRONTEND_INSTALL_DIR"
   cp "$FRONTEND_DIR/package.json" "$FRONTEND_DIR/package-lock.json" "$FRONTEND_INSTALL_DIR/"

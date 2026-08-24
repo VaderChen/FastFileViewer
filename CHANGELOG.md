@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.26.0824
+
+### Downloads and media compatibility
+
+- Added a real-time music visualizer with selectable spectrum bars, waveform, or combined rendering powered by the Web Audio API.
+- Changed spectrum mapping to 72 logarithmic centre frequencies with linear interpolation over a 32768-point floating-decibel FFT from 18 Hz to 24 kHz when the source sample rate permits, while bounding waveform drawing to 1,600 points.
+- Preserved music time, play/pause, volume, and mute state while navigating images and documents, and paused retained audio when selecting a video.
+- Added automatic next-track playback that skips non-audio entries and wraps through the current library order.
+- Added an interactive-latency Web Audio output gain stage so native mute changes silence playback immediately.
+- Expanded audio support to MP2/MP3, M4A/M4B/ALAC, WAV, AAC, FLAC, OGG/OPUS, AIFF, CAF, WMA, APE, WavPack, AC-3, AMR, and MKA.
+- Added native-first FLAC playback with automatic temporary M4A fallback when WebKit cannot decode the source.
+- Added eager `ffmpeg` compatibility conversion for WMA, APE, WavPack, standalone ALAC, AC-3, and AMR audio.
+- Added a Downloads source tab with automatic URL paste and drag-and-drop handling, queue progress, cancellation, persistent history, record removal, and Finder actions.
+- Added direct downloads for public HTTP/HTTPS images, videos, articles, and files under `~/Downloads/FastFileViewer`.
+- Added generic video-page resolution for `.m3u8` URLs embedded in HTML or inline scripts, including escaped and relative URLs without executing page JavaScript.
+- Added a multi-select dialog when a page exposes multiple HLS candidates; each selected stream becomes an independent cancellable download.
+- Added unencrypted, completed `.m3u8` VOD support with highest-bandwidth master-playlist selection, relative URLs, initialization segments, byte ranges, and bounded segment merging.
+- Added SSRF and DNS-rebinding defenses that reject localhost, private, link-local, multicast, CGNAT, and reserved addresses on initial requests, redirects, and connection-time DNS resolution.
+- Added download size limits, non-overwriting atomic completion, cancellation cleanup, and local queue persistence without cookies or credentials.
+- Added optional MKV playback through a locally installed `ffmpeg`, using MP4 remuxing first and VideoToolbox transcoding as a fallback.
+- Updated the product description from offline-only to local-first: viewing and rendering remain local, while network access occurs only after an explicit download action.
+
 ## 1.26.0820
 
 ### Media and subtitles

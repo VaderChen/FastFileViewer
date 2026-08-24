@@ -2,7 +2,7 @@
   "name": "fastfileviewer-frontend",
   "private": true,
   "version": "0.1.0",
-  "description": "FastFileViewer offline macOS content workspace frontend",
+  "description": "FastFileViewer local-first macOS file workspace frontend",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",

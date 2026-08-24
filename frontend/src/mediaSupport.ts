@@ -1,6 +1,70 @@
 import type { ImageEntry } from './types';
 
 const subtitlePriority = ['.vtt', '.srt', '.ass', '.ssa', '.smi', '.sub'];
+export const audioSpectrumMinimumDecibels = -90;
+export const audioSpectrumMaximumDecibels = -10;
+
+export function findNextAudioEntry(entries: ImageEntry[], currentId: string): ImageEntry | null {
+  if (entries.length < 2) {
+    return null;
+  }
+  const currentIndex = entries.findIndex((entry) => entry.id === currentId);
+  const startIndex = currentIndex >= 0 ? currentIndex : entries.length - 1;
+  for (let offset = 1; offset < entries.length; offset += 1) {
+    const candidate = entries[(startIndex + offset) % entries.length];
+    if (candidate.kind === 'audio' && candidate.id !== currentId) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+export function calculateLogSpectrumAmplitudes(
+  frequencyData: Float32Array,
+  sampleRate: number,
+  fftSize: number,
+  barCount: number,
+  idle: boolean,
+): number[] {
+  if (barCount <= 0) {
+    return [];
+  }
+  if (idle) {
+    return Array.from({ length: barCount }, (_, index) => 0.025 + 0.018 * Math.sin(index * 0.55) ** 2);
+  }
+
+  const minimumFrequency = 18;
+  const maximumFrequency = Math.max(minimumFrequency, Math.min(24_000, sampleRate / 2));
+  const frequencyRatio = maximumFrequency / minimumFrequency;
+  const binFrequency = sampleRate / fftSize;
+  const rawAmplitudes = Array.from({ length: barCount }, (_, index) => {
+    const centerPosition = barCount === 1 ? 0 : index / (barCount - 1);
+    const centerFrequency = minimumFrequency * frequencyRatio ** centerPosition;
+    return interpolateSpectrumAmplitude(frequencyData, centerFrequency / binFrequency);
+  });
+  const framePeak = Math.max(0.22, ...rawAmplitudes);
+  const automaticGain = Math.min(1.45, 0.92 / framePeak);
+  return rawAmplitudes.map((amplitude) => Math.min(1, (amplitude * automaticGain) ** 0.85));
+}
+
+function interpolateSpectrumAmplitude(frequencyData: Float32Array, binPosition: number): number {
+  const lowerBin = Math.min(frequencyData.length - 1, Math.max(1, Math.floor(binPosition)));
+  const upperBin = Math.min(frequencyData.length - 1, lowerBin + 1);
+  const fraction = Math.min(1, Math.max(0, binPosition - lowerBin));
+  const lowerAmplitude = spectrumDecibelsToAmplitude(frequencyData[lowerBin]);
+  const upperAmplitude = spectrumDecibelsToAmplitude(frequencyData[upperBin]);
+  return lowerAmplitude + (upperAmplitude - lowerAmplitude) * fraction;
+}
+
+function spectrumDecibelsToAmplitude(decibels: number): number {
+  if (!Number.isFinite(decibels)) {
+    return 0;
+  }
+  const normalized = Math.min(1, Math.max(0,
+    (decibels - audioSpectrumMinimumDecibels) / (audioSpectrumMaximumDecibels - audioSpectrumMinimumDecibels),
+  ));
+  return normalized ** 1.35;
+}
 
 export function findSidecarSubtitle(media: ImageEntry, entries: ImageEntry[]): ImageEntry | null {
   if (media.kind !== 'video') {

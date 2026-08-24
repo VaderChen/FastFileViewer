@@ -286,7 +286,7 @@ func TestScanReportsCorruptArchive(t *testing.T) {
 
 func TestScanFindsMediaAndSubtitleEntries(t *testing.T) {
 	directory := t.TempDir()
-	for _, name := range []string{"clip.mp4", "track.flac", "captions.srt"} {
+	for _, name := range []string{"clip.mp4", "track.flac", "music.wma", "lossless.ape", "captions.srt"} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("placeholder"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -303,12 +303,81 @@ func TestScanFindsMediaAndSubtitleEntries(t *testing.T) {
 	for name, expectedKind := range map[string]string{
 		"clip.mp4":     "video",
 		"track.flac":   "audio",
+		"music.wma":    "audio",
+		"lossless.ape": "audio",
 		"captions.srt": "subtitle",
 	} {
 		if kinds[name] != expectedKind {
 			t.Fatalf("unexpected kind for %s: %q", name, kinds[name])
 		}
 	}
+}
+
+func TestMainstreamAudioFormatsAndCompatibility(t *testing.T) {
+	nativeFormats := []string{".mp3", ".mp2", ".m4a", ".m4b", ".wav", ".aac", ".flac", ".ogg", ".oga", ".opus", ".aif", ".aiff", ".aifc", ".caf"}
+	for _, extension := range nativeFormats {
+		if !isSupportedMedia(extension) || entryKind(extension) != "audio" {
+			t.Fatalf("native audio format was not classified: %s", extension)
+		}
+		if mimeByExtension(extension) == "application/octet-stream" || mediaMIMEByExtension(extension) == "application/octet-stream" {
+			t.Fatalf("native audio MIME is missing: %s", extension)
+		}
+		if requiresAudioCompatibility(extension) {
+			t.Fatalf("native audio format should not require eager conversion: %s", extension)
+		}
+	}
+	compatibleFormats := []string{".wma", ".ape", ".wv", ".alac", ".ac3", ".amr", ".mka"}
+	for _, extension := range compatibleFormats {
+		if !isSupportedMedia(extension) || entryKind(extension) != "audio" {
+			t.Fatalf("compatible audio format was not classified: %s", extension)
+		}
+		if !requiresAudioCompatibility(extension) {
+			t.Fatalf("audio format should use compatibility conversion: %s", extension)
+		}
+	}
+}
+
+func TestPrepareCompatibleAudioCreatesM4ACache(t *testing.T) {
+	fakeFFmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(fakeFFmpeg, []byte("#!/bin/sh\nfor argument do output=\"$argument\"; done\nprintf converted-audio > \"$output\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	originalFinder := findFFmpegExecutable
+	findFFmpegExecutable = func() (string, error) { return fakeFFmpeg, nil }
+	t.Cleanup(func() { findFFmpegExecutable = originalFinder })
+
+	audioPath := filepath.Join(t.TempDir(), "sample.wma")
+	if err := os.WriteFile(audioPath, []byte("source-audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	application := New()
+	mediaURL, err := application.PrepareCompatibleMediaByPath(audioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(mediaURL, mediaURLPrefix) {
+		t.Fatalf("unexpected compatible media URL: %s", mediaURL)
+	}
+	application.imageMu.Lock()
+	var compatibleEntry ImageEntry
+	for _, entry := range application.lastImages {
+		if entry.Format == ".m4a" {
+			compatibleEntry = entry
+			break
+		}
+	}
+	application.imageMu.Unlock()
+	if compatibleEntry.Path == "" || filepath.Ext(compatibleEntry.Path) != ".m4a" {
+		t.Fatalf("compatible audio entry was not registered: %#v", compatibleEntry)
+	}
+	payload, err := os.ReadFile(compatibleEntry.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(payload) != "converted-audio" {
+		t.Fatalf("unexpected compatible audio payload: %q", payload)
+	}
+	application.cleanupMediaCache()
 }
 
 func TestMediaExtensionSelectionControlsScan(t *testing.T) {

@@ -29,6 +29,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 242, G: 244, B: 241, A: 1},
 		OnStartup:        application.Startup,
 		OnShutdown: func(context.Context) {
+			app.CleanupDownloads(application)
 			app.CleanupMediaCache(application)
 		},
 		Bind: []interface{}{

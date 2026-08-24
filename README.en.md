@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/appicon.png" alt="FastFileViewer icon" width="128" />
   <h1>FastFileViewer</h1>
-  <p>An offline macOS content workspace built with Go, Wails, React, and TypeScript.</p>
+  <p>A local-first macOS file workspace built with Go, Wails, React, and TypeScript.</p>
 </div>
 
 <p align="center">
@@ -16,8 +16,17 @@
 - Browse supported content inside ZIP, TAR, TGZ, and TAR.GZ archives without extracting them.
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
 - Render Markdown, syntax-highlight code, browse JSON trees, and search or sort CSV/TSV tables.
-- Play common video and audio formats with seeking, volume, fullscreen, and keyboard controls.
+- Play common video and music formats; choose spectrum bars, waveform, or both visualizations, with the selection remembered locally.
+- Keep music time, play/pause, volume, and mute state while browsing other images or documents; background music pauses when a video is selected.
+- Automatically advance to the next audio track after playback ends, skipping non-audio entries and wrapping through the current library order.
+- Spectrum bars use logarithmic centre-frequency interpolation over a 32768-point floating-decibel FFT and cover 18 Hz–24 kHz when the source sample rate permits.
+- Audio support covers MP2/MP3, M4A/M4B/ALAC, WAV, AAC, FLAC, OGG/OPUS, AIFF, CAF, WMA, APE, WavPack, AC-3, AMR, and MKA.
+- FLAC uses native WebKit decoding first and automatically falls back to a temporary compatible M4A when native decoding fails.
+- Play MKV files through automatic temporary MP4 remuxing or transcoding when a local `ffmpeg` installation is available.
 - Automatically attach matching VTT, SRT, ASS, SSA, SMI, and text-based SUB sidecar subtitles.
+- Paste or drop a public HTTP/HTTPS URL into Downloads to fetch images, videos, articles, and regular files; directly accessible video pages resolve `.m3u8` URLs from HTML and inline scripts.
+- A single embedded `.m3u8` starts automatically; multiple candidates open a multi-select dialog and create one download per selection.
+- Download unencrypted, completed `.m3u8` VOD playlists; master playlists select and merge the highest-bandwidth variant.
 - Configure image, document, media, and subtitle scan formats independently.
 - Use a three-pane workspace with persistent pinned folders, batch loading, and cancellable operations.
 - Export selections across folders and archives, calculate SHA-256, and detect byte-identical duplicates.
@@ -35,6 +44,7 @@ The public source edition does not use StoreKit or App Sandbox and does not cont
 - Node.js and npm
 - Xcode Command Line Tools
 - `rsync`
+- `ffmpeg` (optional, required for MKV and non-native audio compatibility playback; install with `brew install ffmpeg`)
 
 ## Development
 
@@ -58,7 +68,9 @@ Prebuilt downloads and SHA-256 checksum files are available from [GitHub Release
 
 ## Privacy and Security
 
-All processing stays local. FastFileViewer does not execute displayed source code or raw Markdown HTML and does not load remote Markdown resources. Do not commit `cert/`, `.env*`, signing assets, packages, personal files, or unredacted debug data. See [SECURITY.md](SECURITY.md).
+Scanning, rendering, thumbnails, playback, and content analysis stay local. FastFileViewer only makes an outbound HTTP/HTTPS connection after the user explicitly pastes or drops a URL into Downloads. The downloader does not use browser cookies, login state, or custom credentials; it does not support DRM, paywalls, encrypted HLS, or live HLS. The page resolver does not execute JavaScript: it scans at most 32 MB of HTML and inline script text, returns at most 16 `.m3u8` candidates, and sends only a query-free Referer/Origin derived from the source page. Sites that require browser cookies, login, or anti-bot verification are not bypassed and require a direct `.m3u8` URL. Localhost, private, link-local, and other non-public network addresses are rejected on every request and redirect. Downloads are limited to 4 GB per file and are saved under `~/Downloads/FastFileViewer`.
+
+FastFileViewer does not execute displayed source code or raw Markdown HTML and does not load remote Markdown resources. Do not commit `cert/`, `.env*`, signing assets, packages, personal files, or unredacted debug data. See [SECURITY.md](SECURITY.md).
 
 ## License
 
