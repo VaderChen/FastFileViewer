@@ -1,26 +1,23 @@
-# FastFileViewer v1.26.0820
+This release adds local video and audio playback with subtitle support, along with improvements to viewer themes and interactions.
 
-本版本加入本機影音播放與字幕支援，並改善 Viewer 主題與互動體驗。
+## Highlights
 
-## 主要更新
+- Added support for common video and audio formats with play, pause, seeking, volume, fullscreen, and keyboard controls.
+- Added media browsing for regular folders and ZIP, TAR, TGZ, and TAR.GZ archives.
+- Automatically matches VTT, SRT, ASS, SSA, SMI, and text-based SUB subtitles located beside the media file.
+- Added separate media and subtitle format settings for controlling folder and archive scanning.
+- Added GB18030 decoding for documents and subtitles while retaining automatic Big5 and Shift-JIS detection.
+- Fixed code themes such as GitHub Dark not applying the matching background color.
+- Removed the translucent hover overlay from video playback and replaced it with a custom control bar.
+- Improved media range responses, extracted archive cleanup, format filtering, and subtitle conversion validation.
 
-- 支援常見影片與音訊格式，提供播放、暫停、進度跳轉、音量、全螢幕及鍵盤控制。
-- 支援資料夾及 ZIP、TAR、TGZ、TAR.GZ 壓縮檔內的影音內容。
-- 自動配對同目錄的 VTT、SRT、ASS、SSA、SMI 與文字型 SUB 字幕。
-- 新增影音與字幕格式設定，可分別控制資料夾及壓縮檔掃描範圍。
-- 新增 GB18030 文件與字幕解碼，並保留 Big5、Shift-JIS 自動偵測。
-- 修正 GitHub Dark 等程式碼主題未同步切換背景色的問題。
-- 移除影片滑鼠懸停時的半透明遮罩，改用自訂播放控制列。
-- 強化媒體 Range 回應、壓縮檔暫存清理、格式過濾及字幕轉換檢查。
+## System Requirements
 
-## 系統需求
+- macOS 12.0 or later
+- Apple Silicon (arm64)
 
-- macOS 12.0 或以上
-- Apple Silicon（arm64）
-
-## 下載檔案
+## Downloads
 
 - `FastFileViewer-1.26.0820-arm64.dmg`
 - `FastFileViewer-1.26.0820-arm64.dmg.sha256`
 
-完整變更請參閱 [CHANGELOG](https://github.com/VaderChen/FastFileViewer/blob/v1.26.0820/CHANGELOG.md)，授權資訊請參閱 [GPLv3](https://github.com/VaderChen/FastFileViewer/blob/v1.26.0820/LICENSE) 與 [第三方套件通知](https://github.com/VaderChen/FastFileViewer/blob/v1.26.0820/THIRD-PARTY-NOTICES.md)。
