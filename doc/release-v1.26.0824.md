@@ -1,5 +1,3 @@
-# FastFileViewer v1.26.0824
-
 FastFileViewer is now a local-first file, media, archive, and download workspace for Apple Silicon Macs. This release adds URL downloads, HLS video-page discovery, broader media compatibility, and real-time music visualization while keeping file browsing and rendering local.
 
 ## Highlights
