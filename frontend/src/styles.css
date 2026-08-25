@@ -1766,9 +1766,22 @@ body.resizing-library {
   display: block;
   max-width: none;
   max-height: none;
-  transition: transform 120ms ease;
   transform-origin: center center;
   user-select: none;
+}
+
+.image-pan-surface {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  margin: auto;
+}
+
+.image-pan-surface.ready img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
 }
 
 .image-stage.fit img {
@@ -1791,10 +1804,6 @@ body.resizing-library {
   align-items: flex-start;
   justify-content: flex-start;
   padding: 14px;
-}
-
-.image-stage.actual img {
-  margin: auto;
 }
 
 .image-stage.actual.has-image {

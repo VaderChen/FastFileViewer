@@ -13,9 +13,10 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - 掃描、Render、快取與內容分析完全在本機進行，不執行程式碼或 Markdown 原始 HTML。
 - 本機影音採可跳轉串流，壓縮檔影音使用生命週期受控的暫存檔。
 - MKV 在偵測到本機 `ffmpeg` 時，優先轉封裝並在必要時使用 VideoToolbox 轉碼成暫存 MP4。
-- 音樂播放器透過 Web Audio API 的 `AnalyserNode` 繪製即時頻譜與波形，暫停時停止動畫更新；頻譜使用 8192 FFT 與對數分配，目標涵蓋 18 Hz–24 kHz，並受來源取樣率的 Nyquist 上限約束。波形依畫布寬度降採樣至最多 1,600 點。
+- 音樂播放器透過 Web Audio API 的 `AnalyserNode` 繪製即時頻譜與波形，暫停時停止動畫更新；頻譜使用 32768-point floating-decibel FFT，以 72 個對數中心頻率線性插值，目標涵蓋 18 Hz–24 kHz，並受來源取樣率的 Nyquist 上限約束。波形依畫布寬度降採樣至最多 1,600 點。
 - MP2／MP3、M4A／M4B、WAV、AAC、FLAC、OGG／OPUS、AIFF 與 CAF 優先原生播放；FLAC 等原生解碼失敗時自動要求相容 M4A。
-- WMA、APE、WavPack、獨立 ALAC、AC-3、AMR 與 MKA 直接透過本機 `ffmpeg` 轉為 256 kbps AAC M4A 暫存檔。
+- WMA、APE、WavPack、獨立 ALAC、AC-3、AMR 與 MKA 直接透過本機 `ffmpeg` 轉為 256 kbps AAC M4A 暫存檔；MKV 先嘗試改封裝，失敗時才使用 VideoToolbox 轉碼。
+- MKV 改封裝完成後，使用者可選擇把可播放檔保存至原資料夾並將原檔移至垃圾桶；取消時維持原檔與暫存播放流程。
 - 自動配對同目錄 sidecar 字幕，並轉換常見文字字幕格式供播放器顯示。
 - 「下載項目」只對使用者明確貼上或拖入的公開 HTTP/HTTPS URL 建立連出連線，包含未加密且已結束的 HLS VOD。
 
@@ -51,12 +52,26 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `frontend/src/App.tsx`：內容樹、Viewer、工作區、設定與 About 授權資訊。
 - `frontend/src/MediaPlayer.tsx`：影片與音訊播放、Web Audio 頻譜／波形、相容音訊 fallback、控制列及字幕掛載。
 - `frontend/src/mediaSupport.ts`：sidecar 字幕配對與 WebVTT 轉換。
+- `frontend/src/useImageViewer.ts`、`frontend/src/imageLayout.ts`：圖片縮放、旋轉、置中、拖曳平移與版面計算。
+- `frontend/src/useWorkspace.ts`、`frontend/src/libraryTree.ts`：內容工作區篩選、分批載入、選取、匯出、重複偵測與樹狀資料合併。
+- `frontend/src/useDownloads.ts`、`frontend/src/downloads.ts`：下載佇列、網址／HLS 候選處理、拖放與下載狀態輪詢。
+- `frontend/src/ThumbnailCard.tsx`、`frontend/src/format.ts`、`frontend/src/operations.ts`：縮圖卡片、格式化與可取消操作的共用前端邏輯。
 - `frontend/src/styles.css`：版面與 Viewer 樣式。
 - `scripts/generate-third-party-notices.mjs`：產生第三方套件清冊與完整授權文字。
 - `scripts/write-build-metadata.mjs`：產生可追溯建置資訊。
 - `build/darwin/Info.plist`：macOS production bundle 模板。
 
-## 後端 API
+## 後端服務與 API
+
+Wails 綁定三個服務，避免圖庫、媒體與下載佇列共用同一組生命週期狀態：
+
+- `Library`（`App`）：目錄掃描、快取、文件／圖片載入、匯出、Checksum、重複偵測及可取消操作。
+- `Media`（`MediaService`）：媒體註冊、Range 播放、壓縮檔媒體暫存、`ffmpeg` 相容轉換及播放快取清理。
+- `Download`（`DownloadService`）：公開 URL 驗證、下載佇列、HLS VOD、持久化歷史與 Finder 操作。
+
+`main.go` 由 `app.New()` 建立服務集合，透過 `Services.Startup`／`Services.Shutdown` 將同一個應用程式 context 傳給各服務，並以 `NewMediaMiddleware` 將受控媒體路由掛到 Wails asset server。
+
+主要 API：
 
 - `Bootstrap()`：回傳預設路徑及支援格式。
 - `SelectDirectory(title)`：原生目錄選擇器。
@@ -67,6 +82,8 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `LoadDocumentByPath(...)`：讀取一般或壓縮檔內文件。
 - `PrepareMediaByPath(...)`：驗證媒體路徑並建立受控本機播放網址。
 - `PrepareCompatibleMediaByPath(...)`：原生音訊解碼失敗時，建立並註冊生命週期受控的 M4A 相容暫存檔。
+- `ReleasePlaybackCache(...)`：釋放指定媒體的暫存播放檔。
+- `ConfirmRemuxedOriginalCleanup(...)`：將 MKV 改封裝結果保存至原資料夾，並在成功後把原始檔移至垃圾桶。
 - `StartDownload(url)`／`ListDownloads()`：建立下載及取得佇列狀態。
 - `ResolveDownloadURL(url)`：讀取公開頁面的 HTML／inline script 並回傳最多 16 個 `.m3u8` 候選，不執行 JavaScript。
 - `StartResolvedDownload(sourceURL, hlsURL, name)`：以來源頁推導的安全 Referer／Origin 建立已選取 HLS 的獨立下載。
@@ -93,7 +110,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - 下載不使用 Cookie、登入狀態或自訂認證，不繞過 DRM、付費牆或加密串流。
 - 一般單檔上限 4 GB；文字、HTML、HLS 播放清單上限 32 MB；HLS 上限 20,000 段且必須包含 `EXT-X-ENDLIST`。
 - HLS master playlist 依 `BANDWIDTH` 選擇最高頻寬 variant；拒絕 `EXT-X-KEY` 加密內容，支援相對 URL、初始化片段及 byte range。
-- 前端對單一網頁候選直接呼叫 `StartResolvedDownload`；複數候選顯示 DLG 供複選，確認後逐項建立下載。沒有候選時維持 HTML 下載。
+- 前端對單一網頁候選直接呼叫 `StartResolvedDownload`；複數候選顯示對話框供複選，確認後逐項建立下載。沒有候選時維持 HTML 下載。
 - Resolver 不使用瀏覽器 Cookie 或模擬／繞過 Cloudflare 等反機器人驗證；401／403 會回傳明確提示，要求直接 `.m3u8`。
 - 下載使用同目錄暫存檔及排他 hard link 完成，不覆寫既有檔案；目的地為 `~/Downloads/FastFileViewer`。
 - 下載紀錄位於 `os.UserConfigDir()/FastFileViewer/downloads.json`，不保存 URL query 或 fragment；App 關閉時未完成項目下次啟動會標示為失敗。
@@ -137,7 +154,15 @@ BUILD_SOURCE_URL=https://github.com/example/FastFileViewer \
 4. 在本機暫存目錄建立 Wails App。
 5. 嵌入 GPLv3、第三方授權及 `build-metadata.json`。
 6. 移除不屬於公開建置的本機發布資產並完成 App Bundle 封裝。
-7. 完成 App Bundle 並輸出 `build/bin/FastFileViewer.app`。
+7. 完成 App Bundle 並輸出 `dist/FastFileViewer.app`。
+
+Developer ID DMG：
+
+```bash
+./package-dmg.command
+```
+
+無參數執行或雙擊 `package-dmg.command` 時，預設簽署目前 `dist/FastFileViewer.app`；輸出檔名會包含版本與 build label。正式流程使用 `./package-dmg.command --build`，會要求已追蹤工作樹乾淨、HEAD 具有精確版本 tag。兩種模式都會自動偵測 `Developer ID Application` 與 `VaderApp`、`FastFileViewer-notary`、`notarytool` 等 notarytool Keychain Profile。
 
 ## 授權清冊
 

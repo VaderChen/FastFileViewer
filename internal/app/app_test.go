@@ -154,7 +154,7 @@ func TestLibraryCachePersistence(t *testing.T) {
 	userCacheDir = func() (string, error) { return cacheRoot, nil }
 	t.Cleanup(func() { userCacheDir = originalUserCacheDir })
 
-	application := New()
+	application := New().Library
 	firstPayload := `{"rootPath":"/library/first","tree":{"id":"first"}}`
 	secondPayload := `{"rootPath":"/library/second","tree":{"id":"second"}}`
 	if err := application.SaveLibraryCache("/library/first", firstPayload); err != nil {
@@ -197,7 +197,7 @@ func TestLibraryCacheRejectsInvalidInput(t *testing.T) {
 	userCacheDir = func() (string, error) { return cacheRoot, nil }
 	t.Cleanup(func() { userCacheDir = originalUserCacheDir })
 
-	application := New()
+	application := New().Library
 	if err := application.SaveLibraryCache("", "{}"); err == nil {
 		t.Fatal("expected empty root path error")
 	}
@@ -275,7 +275,7 @@ func TestScanReportsCorruptArchive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "broken.tgz"), []byte("not gzip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := New().ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestScanFindsMediaAndSubtitleEntries(t *testing.T) {
 		}
 	}
 
-	result, err := New().ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,23 +350,15 @@ func TestPrepareCompatibleAudioCreatesM4ACache(t *testing.T) {
 	if err := os.WriteFile(audioPath, []byte("source-audio"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	application := New()
-	mediaURL, err := application.PrepareCompatibleMediaByPath(audioPath)
+	media := New().Media
+	mediaURL, err := media.PrepareCompatibleMediaByPath(audioPath, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(mediaURL, mediaURLPrefix) {
 		t.Fatalf("unexpected compatible media URL: %s", mediaURL)
 	}
-	application.imageMu.Lock()
-	var compatibleEntry ImageEntry
-	for _, entry := range application.lastImages {
-		if entry.Format == ".m4a" {
-			compatibleEntry = entry
-			break
-		}
-	}
-	application.imageMu.Unlock()
+	compatibleEntry, _ := media.entries.lookup(hashID("file", audioPath) + "-compatible-audio")
 	if compatibleEntry.Path == "" || filepath.Ext(compatibleEntry.Path) != ".m4a" {
 		t.Fatalf("compatible audio entry was not registered: %#v", compatibleEntry)
 	}
@@ -377,7 +369,7 @@ func TestPrepareCompatibleAudioCreatesM4ACache(t *testing.T) {
 	if string(payload) != "converted-audio" {
 		t.Fatalf("unexpected compatible audio payload: %q", payload)
 	}
-	application.cleanupMediaCache()
+	media.cleanup()
 }
 
 func TestMediaExtensionSelectionControlsScan(t *testing.T) {
@@ -386,7 +378,7 @@ func TestMediaExtensionSelectionControlsScan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := New().ScanDirectory(directory, nil, nil, []string{}, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, []string{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +391,7 @@ func TestScanFindsMediaInsideArchive(t *testing.T) {
 	directory := t.TempDir()
 	writeZipEntry(t, filepath.Join(directory, "media.zip"), "clip.mp4", []byte("placeholder"))
 
-	result, err := New().ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +410,7 @@ func TestLoadDocumentAcceptsSubtitleAndRejectsPlaybackMedia(t *testing.T) {
 	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:00,000 --> 00:00:01,000\n字幕"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := New().LoadDocumentByPath(subtitlePath)
+	payload, err := New().Library.LoadDocumentByPath(subtitlePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,19 +422,19 @@ func TestLoadDocumentAcceptsSubtitleAndRejectsPlaybackMedia(t *testing.T) {
 	if err := os.WriteFile(videoPath, []byte("not a text document"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New().LoadDocumentByPath(videoPath); err == nil {
+	if _, err := New().Library.LoadDocumentByPath(videoPath); err == nil {
 		t.Fatal("playback media should not be loaded as a text document")
 	}
 }
 
 func TestMediaHandlerServesByteRanges(t *testing.T) {
-	application := New()
-	t.Cleanup(application.cleanupMediaCache)
+	media := New().Media
+	t.Cleanup(media.cleanup)
 	mediaPath := filepath.Join(t.TempDir(), "clip.mp4")
 	if err := os.WriteFile(mediaPath, []byte("0123456789"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mediaURL, err := application.PrepareMediaByPath(mediaPath)
+	mediaURL, err := media.PrepareMediaByPath(mediaPath, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +442,7 @@ func TestMediaHandlerServesByteRanges(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, mediaURL, nil)
 	request.Header.Set("Range", "bytes=2-5")
 	response := httptest.NewRecorder()
-	NewMediaMiddleware(application)(http.NotFoundHandler()).ServeHTTP(response, request)
+	NewMediaMiddleware(media)(http.NotFoundHandler()).ServeHTTP(response, request)
 	if response.Code != http.StatusPartialContent {
 		t.Fatalf("unexpected media status: %d", response.Code)
 	}
@@ -463,11 +455,11 @@ func TestMediaHandlerServesByteRanges(t *testing.T) {
 }
 
 func TestMediaHandlerExtractsArchiveEntryForSeeking(t *testing.T) {
-	application := New()
-	t.Cleanup(application.cleanupMediaCache)
+	media := New().Media
+	t.Cleanup(media.cleanup)
 	archivePath := filepath.Join(t.TempDir(), "media.zip")
 	writeZipEntry(t, archivePath, "folder/clip.mp4", []byte("archive-media"))
-	mediaURL, err := application.PrepareMediaByPath(archivePath + "::folder/clip.mp4")
+	mediaURL, err := media.PrepareMediaByPath(archivePath+"::folder/clip.mp4", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +467,7 @@ func TestMediaHandlerExtractsArchiveEntryForSeeking(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, mediaURL, nil)
 	request.Header.Set("Range", "bytes=8-12")
 	response := httptest.NewRecorder()
-	NewMediaMiddleware(application)(http.NotFoundHandler()).ServeHTTP(response, request)
+	NewMediaMiddleware(media)(http.NotFoundHandler()).ServeHTTP(response, request)
 	if response.Code != http.StatusPartialContent || response.Body.String() != "media" {
 		t.Fatalf("unexpected archived media response: status=%d body=%q", response.Code, response.Body.String())
 	}
@@ -486,13 +478,13 @@ func TestPrepareMediaRejectsDocuments(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("not media"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New().PrepareMediaByPath(filePath); err == nil {
+	if _, err := New().Media.PrepareMediaByPath(filePath, 0); err == nil {
 		t.Fatal("document should not be registered as playback media")
 	}
 }
 
 func TestCancelledOperationStopsScan(t *testing.T) {
-	application := New()
+	application := New().Library
 	operationID := application.BeginOperation()
 	application.CancelOperation(operationID)
 	_, err := application.ScanDirectory(t.TempDir(), nil, nil, nil, operationID)
@@ -513,7 +505,7 @@ func TestDetectDuplicatesStreamsFiles(t *testing.T) {
 		}
 		entries = append(entries, buildFileImageEntry(filePath, int64(len(contents[index]))))
 	}
-	groups, err := New().DetectDuplicates(entries, 0)
+	groups, err := New().Library.DetectDuplicates(entries, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +519,7 @@ func TestCalculateChecksum(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("FastFileViewer"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	application := New()
+	application := New().Library
 	operationID := application.BeginOperation()
 	hash, err := application.CalculateChecksum(buildFileImageEntry(filePath, 10), operationID)
 	if err != nil {

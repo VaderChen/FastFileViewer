@@ -11,6 +11,10 @@ import {
 interface MediaPlayerLabels {
   loading: string;
   playbackFailed: string;
+  remuxCleanupTitle: string;
+  remuxCleanupMessage: string;
+  remuxCleanupConfirm: string;
+  remuxCleanupCancel: string;
   subtitleFailed: string;
   play: string;
   pause: string;
@@ -35,6 +39,13 @@ interface MediaPlayerProps {
   visible?: boolean;
   pausePlayback?: boolean;
   onAudioEnded?: () => boolean;
+  onOriginalReplaced?: (replacement: ImageEntry, replacedEntryId: string) => void;
+}
+
+interface ResumedVideoPlayback {
+  entryId: string;
+  position: number;
+  playing: boolean;
 }
 
 interface AudioGraph {
@@ -50,13 +61,18 @@ type AudioVisualizationMode = 'spectrum' | 'waveform' | 'both';
 const audioGraphs = new WeakMap<HTMLAudioElement, AudioGraph>();
 const audioVisualizationStorageKey = 'fastfileviewer.audioVisualizationMode';
 
-export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlayback = false, onAudioEnded }: MediaPlayerProps) {
+export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlayback = false, onAudioEnded, onOriginalReplaced }: MediaPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioCanvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioAnimationRef = useRef<number | null>(null);
   const audioFallbackAttemptedRef = useRef(false);
+  const remuxCleanupPromptRef = useRef<Promise<unknown> | null>(null);
+  const prepareOperationRef = useRef(0);
+  const resumedPlaybackRef = useRef<ResumedVideoPlayback | null>(null);
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
   const resumeAudioAfterSourceChangeRef = useRef(false);
   const videoFrameRef = useRef<HTMLDivElement>(null);
   const [mediaURL, setMediaURL] = useState('');
@@ -85,26 +101,69 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     setCurrentTime(0);
     setDuration(0);
     audioFallbackAttemptedRef.current = entry.kind === 'audio' && requiresEagerAudioCompatibility(entry.format);
-    void window.go?.app?.App?.PrepareMediaByPath?.(entry.path)
-      .then((url) => {
-        if (!cancelled && url) {
-          setMediaURL(url);
+    remuxCleanupPromptRef.current = null;
+    // 解壓與改封裝可能很久，掛上操作編號讓切換檔案時能真正中止後端工作。
+    void (async () => {
+      const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+      prepareOperationRef.current = operationId;
+      try {
+        if (cancelled) {
+          return;
         }
-      })
-      .catch((reason: unknown) => {
+        const url = await window.go?.app?.MediaService?.PrepareMediaByPath?.(entry.path, operationId);
+        if (cancelled || !url) {
+          return;
+        }
+        setMediaURL(url);
+        if (entry.kind === 'video' && requiresVideoRemux(entry.format)) {
+          remuxCleanupPromptRef.current = promptRemuxCleanup(entry.path, entry.name, labelsRef.current)
+            ?.then((replacement) => {
+              if (!replacement?.id) {
+                return;
+              }
+              // 原始影片已經進垃圾桶，即使使用者已經切到別的檔案也必須更新清單。
+              if (!cancelled) {
+                const video = videoRef.current;
+                resumedPlaybackRef.current = {
+                  entryId: replacement.id,
+                  position: video?.currentTime ?? 0,
+                  playing: video ? !video.paused : false,
+                };
+              }
+              onOriginalReplaced?.(replacement, entry.id);
+            }) ?? null;
+        }
+      } catch (reason: unknown) {
         if (!cancelled) {
           resumeAudioAfterSourceChangeRef.current = false;
           setError(reason instanceof Error && reason.message
             ? reason.message
             : typeof reason === 'string' && reason
               ? reason
-              : labels.playbackFailed);
+              : labelsRef.current.playbackFailed);
         }
-      });
+      } finally {
+        finishPrepareOperation(prepareOperationRef, operationId);
+      }
+    })();
     return () => {
       cancelled = true;
+      if (prepareOperationRef.current !== 0) {
+        void window.go?.app?.App?.CancelOperation?.(prepareOperationRef.current);
+      }
+      // 詢問是否保留改封裝結果的對話框還開著時，要等它結束才能釋放暫存檔。
+      const pendingPrompt = remuxCleanupPromptRef.current;
+      remuxCleanupPromptRef.current = null;
+      const releasePlaybackCache = () => {
+        void window.go?.app?.MediaService?.ReleasePlaybackCache?.(entry.path).catch(() => undefined);
+      };
+      if (pendingPrompt) {
+        void pendingPrompt.then(releasePlaybackCache, releasePlaybackCache);
+      } else {
+        releasePlaybackCache();
+      }
     };
-  }, [entry.id, entry.path, labels.playbackFailed]);
+  }, [entry.id, entry.path]);
 
   useEffect(() => {
     if (entry.kind !== 'audio' || !mediaURL) {
@@ -192,14 +251,16 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   }, [pausePlayback]);
 
   const handleAudioError = async () => {
-    if (audioFallbackAttemptedRef.current || !window.go?.app?.App?.PrepareCompatibleMediaByPath) {
+    if (audioFallbackAttemptedRef.current || !window.go?.app?.MediaService?.PrepareCompatibleMediaByPath) {
       setError(labels.playbackFailed);
       return;
     }
     audioFallbackAttemptedRef.current = true;
     setError('');
+    const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+    prepareOperationRef.current = operationId;
     try {
-      const compatibleURL = await window.go.app.App.PrepareCompatibleMediaByPath(entry.path);
+      const compatibleURL = await window.go.app.MediaService.PrepareCompatibleMediaByPath(entry.path, operationId);
       if (!compatibleURL) {
         setError(labels.playbackFailed);
         return;
@@ -211,6 +272,8 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
         : typeof reason === 'string' && reason
           ? reason
           : labels.playbackFailed);
+    } finally {
+      finishPrepareOperation(prepareOperationRef, operationId);
     }
   };
 
@@ -328,7 +391,10 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
                 seekBy(10);
               }
             }}
-            onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+            onLoadedMetadata={(event) => {
+              setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0);
+              resumeReplacedPlayback(event.currentTarget, entry.id, resumedPlaybackRef);
+            }}
             onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
@@ -524,6 +590,54 @@ function releaseAudioGraph(audio: HTMLAudioElement, graph: AudioGraph) {
     audioGraphs.delete(audio);
     void graph.context.close().catch(() => undefined);
   }, 100);
+}
+
+// finishPrepareOperation 會結束後端的操作紀錄，並清掉仍指向這次準備工作的參考。
+function finishPrepareOperation(operationRef: { current: number }, operationId: number) {
+  if (operationId !== 0) {
+    void window.go?.app?.App?.FinishOperation?.(operationId);
+  }
+  if (operationRef.current === operationId) {
+    operationRef.current = 0;
+  }
+}
+
+// requiresVideoRemux 對應 Go 端的同名判斷：WebKit 無法直接播放、需要改封裝的容器。
+function requiresVideoRemux(format: string): boolean {
+  return ['.mkv', '.avi', '.m2ts'].includes(format.toLowerCase());
+}
+
+function promptRemuxCleanup(filePath: string, name: string, labels: MediaPlayerLabels): Promise<ImageEntry | null> | null {
+  const confirmCleanup = window.go?.app?.MediaService?.ConfirmRemuxedOriginalCleanup;
+  if (!confirmCleanup) {
+    return null;
+  }
+  return confirmCleanup(
+    filePath,
+    labels.remuxCleanupTitle,
+    labels.remuxCleanupMessage.replace('{name}', name),
+    labels.remuxCleanupConfirm,
+    labels.remuxCleanupCancel,
+  ).catch(() => null);
+}
+
+// resumeReplacedPlayback 會在原始影片換成保存後的檔案時，接回原本的播放位置。
+function resumeReplacedPlayback(
+  video: HTMLVideoElement,
+  entryId: string,
+  resumedPlaybackRef: { current: ResumedVideoPlayback | null },
+) {
+  const resumed = resumedPlaybackRef.current;
+  if (!resumed || resumed.entryId !== entryId) {
+    return;
+  }
+  resumedPlaybackRef.current = null;
+  if (resumed.position > 0) {
+    video.currentTime = resumed.position;
+  }
+  if (resumed.playing) {
+    void video.play().catch(() => undefined);
+  }
 }
 
 function requiresEagerAudioCompatibility(format: string): boolean {

@@ -4,6 +4,7 @@ declare global {
   interface Window {
     go?: {
       app?: {
+        // App 是圖庫服務：掃描、縮圖、文件與可取消操作。
         App?: {
           Bootstrap: () => Promise<BootstrapPayload>;
           BeginOperation: () => Promise<number>;
@@ -20,11 +21,25 @@ declare global {
           LoadImageByPath: (filePath: string) => Promise<ImagePayload>;
           LoadImageByPathWithOperation: (filePath: string, operationId: number) => Promise<ImagePayload>;
           LoadDocumentByPath: (filePath: string) => Promise<DocumentPayload>;
-          PrepareMediaByPath: (filePath: string) => Promise<string>;
-          PrepareCompatibleMediaByPath: (filePath: string) => Promise<string>;
           LoadThumbnailByPath: (filePath: string, maxDimension: number) => Promise<ImagePayload>;
           ExportImages: (images: ImageEntry[], dialogTitle: string, operationId: number) => Promise<ExportResult>;
           DetectDuplicates: (images: ImageEntry[], operationId: number) => Promise<DuplicateGroup[]>;
+        };
+        // MediaService 負責播放前的解壓、改封裝與播放快取。
+        MediaService?: {
+          PrepareMediaByPath: (filePath: string, operationId: number) => Promise<string>;
+          PrepareCompatibleMediaByPath: (filePath: string, operationId: number) => Promise<string>;
+          ReleasePlaybackCache: (filePath: string) => Promise<void>;
+          ConfirmRemuxedOriginalCleanup: (
+            filePath: string,
+            title: string,
+            message: string,
+            confirmLabel: string,
+            cancelLabel: string,
+          ) => Promise<ImageEntry>;
+        };
+        // DownloadService 負責下載佇列與歷史紀錄。
+        DownloadService?: {
           StartDownload: (url: string) => Promise<DownloadItem>;
           ResolveDownloadURL: (url: string) => Promise<DownloadResolution>;
           StartResolvedDownload: (sourceUrl: string, hlsUrl: string, preferredName: string) => Promise<DownloadItem>;

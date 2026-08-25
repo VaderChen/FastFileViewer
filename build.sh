@@ -5,7 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 APP_NAME="FastFileViewer"
-APP_PATH="$SCRIPT_DIR/build/bin/$APP_NAME.app"
+APP_OUTPUT_DIR="${APP_OUTPUT_DIR:-$SCRIPT_DIR/dist}"
+APP_PATH="$APP_OUTPUT_DIR/$APP_NAME.app"
+APP_ICON_SOURCE="$SCRIPT_DIR/assets/appicon.png"
 TMP_ROOT=""
 LOCAL_BUILD_CACHE="${FASTFILEVIEWER_BUILD_CACHE:-${TMPDIR:-/tmp}/fastfileviewer-build-cache}"
 
@@ -44,6 +46,10 @@ if [[ ! "$APP_BUNDLE_VERSION" =~ '^[0-9]+([.][0-9]+)*$' ]]; then
 fi
 if [[ ! "$APP_BUNDLE_ID" =~ '^[A-Za-z0-9-]+([.][A-Za-z0-9-]+)+$' ]]; then
   echo "APP_BUNDLE_ID 格式錯誤：$APP_BUNDLE_ID"
+  exit 1
+fi
+if [[ ! -s "$APP_ICON_SOURCE" ]]; then
+  echo "找不到 App 圖示：$APP_ICON_SOURCE"
   exit 1
 fi
 
@@ -150,7 +156,7 @@ done
 
 BUILD_LDFLAGS="-X github.com/VaderChen/FastFileViewer/internal/app.appVersion=$APP_MARKETING_VERSION -X github.com/VaderChen/FastFileViewer/internal/app.appCommit=$BUILD_COMMIT -X github.com/VaderChen/FastFileViewer/internal/app.appTag=$BUILD_TAG -X github.com/VaderChen/FastFileViewer/internal/app.appBuildState=$BUILD_STATE -X github.com/VaderChen/FastFileViewer/internal/app.appSourceURL=$BUILD_SOURCE_URL"
 
-mkdir -p "$SCRIPT_DIR/build/bin"
+mkdir -p "$APP_OUTPUT_DIR"
 rm -rf "$APP_PATH"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fastfileviewer-build.XXXXXX")"
 STAGING_DIR="$TMP_ROOT/project"
@@ -172,6 +178,10 @@ rsync -a \
   "$SCRIPT_DIR/" "$STAGING_DIR/"
 cleanup_appledouble "$STAGING_DIR"
 
+echo "準備 App 圖示：$APP_ICON_SOURCE"
+mkdir -p "$STAGING_DIR/build"
+cp "$APP_ICON_SOURCE" "$STAGING_DIR/build/appicon.png"
+
 echo "建立非沙盒 Wails App..."
 (
   cd "$STAGING_DIR"
@@ -179,6 +189,10 @@ echo "建立非沙盒 Wails App..."
 )
 if [[ ! -d "$STAGING_APP_PATH" ]]; then
   echo "建置失敗：找不到 $STAGING_APP_PATH"
+  exit 1
+fi
+if [[ ! -s "$STAGING_APP_PATH/Contents/Resources/iconfile.icns" ]]; then
+  echo "建置失敗：App Bundle 缺少 iconfile.icns"
   exit 1
 fi
 

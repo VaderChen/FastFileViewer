@@ -23,11 +23,12 @@
 - MP2／MP3、M4A／M4B／ALAC、WAV、AAC、FLAC、OGG／OPUS、AIFF、CAF、WMA、APE、WavPack、AC-3、AMR、MKA に対応します。
 - FLAC は WebKit のネイティブ再生を優先し、失敗した場合は一時的な互換 M4A に自動変換します。
 - ローカルに `ffmpeg` がある場合、MKV を一時 MP4 に自動リマックスまたはトランスコードして再生します。
+- MKV のリマックス後は、再生可能なファイルを元のフォルダに保存し、元ファイルをゴミ箱へ移動するか選択できます。次回から変換は不要です。
 - 同じフォルダにある VTT、SRT、ASS、SSA、SMI、テキスト形式 SUB 字幕を自動的に関連付けます。
 - 「ダウンロード」に公開 HTTP/HTTPS URL を貼り付けるかドロップして、画像、動画、記事、一般ファイルを取得できます。直接アクセス可能な動画ページでは HTML とインラインスクリプトから `.m3u8` を解析します。
 - `.m3u8` が 1 件なら自動開始し、複数見つかった場合は複数選択ダイアログを表示して選択ごとにダウンロードを作成します。
 - 暗号化されていない完了済み `.m3u8` VOD に対応し、マスタープレイリストでは最高帯域幅のバリアントを選択して結合します。
-- 画像、文書、メディア、字幕のスキャン形式を個別に設定できます。
+- 画像、文書、メディア／字幕のスキャン形式を個別に設定できます。
 - 3 ペインワークスペース、ピン留めフォルダ、分割読み込み、キャンセル可能な処理を提供します。
 - 複数項目の書き出し、SHA-256 計算、完全重複ファイル検出に対応します。
 - ライブラリインデックスとサムネイルはローカルに保存され、ネットワークサービスを使用しません。
@@ -51,9 +52,11 @@ cd FastFileViewer
 ./build.sh
 ```
 
-出力は `build/bin/FastFileViewer.app` です。ビルド時に GPLv3、第三者ライセンス全文、通知、Git のビルドメタデータを App Bundle の `Contents/Resources` に含めます。
+出力は `dist/FastFileViewer.app` です。ビルド時に GPLv3、第三者ライセンス全文、通知、Git のビルドメタデータを App Bundle の `Contents/Resources` に含めます。
 
 ビルド済みファイルと SHA-256 チェックサムは [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) から取得できます。
+
+Developer ID 署名と Apple 公証を行う DMG は `package-dmg.command` の実行またはダブルクリックで作成できます。引数がない場合は既存の `dist/FastFileViewer.app` を使用します。正式なタグ付き再ビルドには `./package-dmg.command --build` を使用し、クリーンな worktree と正確な tag が必要です。DMG 作成に App Store provisioning profile は不要で、利用可能な `VaderApp` notarytool Keychain Profile を自動検出します。
 
 ## プライバシーとセキュリティ
 
