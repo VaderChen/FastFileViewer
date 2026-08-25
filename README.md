@@ -28,11 +28,12 @@
 - 音訊支援 MP2／MP3、M4A／M4B／ALAC、WAV、AAC、FLAC、OGG／OPUS、AIFF、CAF、WMA、APE、WavPack、AC-3、AMR 與 MKA。
 - FLAC 優先使用 WebKit 原生解碼；若原生解碼失敗，會自動建立暫存 M4A 相容檔。
 - 安裝本機 `ffmpeg` 後，可將 MKV 自動轉封裝或轉碼為暫存 MP4 播放。
+- MKV 改封裝成功後可選擇將可播放檔保存至原資料夾，並把原始檔移至垃圾桶，之後可直接播放而不必再次轉換。
 - 自動配對同目錄的 VTT、SRT、ASS、SSA、SMI 與文字型 SUB 字幕。
 - 在「下載項目」貼上或拖入公開 HTTP/HTTPS 網址，自動下載圖片、影片、文章與一般檔案；可直接存取的影片頁會解析 HTML／內嵌腳本中的 `.m3u8`。
 - 影片頁只有一個 `.m3u8` 時自動下載；找到多個時顯示複選對話框，每個選項建立獨立下載項目。
 - 支援未加密、已結束的 `.m3u8` VOD；主播放清單會選擇最高頻寬版本並合併媒體片段。
-- 可分別設定要掃描的圖片、文件、影音及字幕格式。
+- 可分別設定要掃描的圖片、文件與影音／字幕格式。
 - 三區式內容工作區、持久化釘選目錄、批次載入及可取消作業。
 - 跨資料夾與壓縮檔多選匯出、SHA-256 檢查及完全重複檔案偵測。
 - 目錄索引、縮圖及相鄰圖片快取均保存在本機，不需網路服務。
@@ -77,7 +78,7 @@ cd FastFileViewer
 輸出：
 
 ```text
-build/bin/FastFileViewer.app
+dist/FastFileViewer.app
 ```
 
 建置流程會執行 Go vet、race test、前端測試與 npm audit，並在 App Bundle 的 `Contents/Resources` 中加入：
@@ -88,6 +89,14 @@ build/bin/FastFileViewer.app
 - `build-metadata.json`
 
 預先建置版本及 SHA-256 校驗檔可由 [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) 取得。
+
+使用 Developer ID 簽署並送交 Apple 公證的 DMG：
+
+```bash
+./package-dmg.command
+```
+
+無參數執行或雙擊 `.command` 時，會直接使用 `dist/FastFileViewer.app`。正式 tag 發布請執行 `./package-dmg.command --build`，此時才會要求乾淨工作樹與精確 tag。DMG 流程不需要 App Store provisioning profile，會自動偵測可用的 `VaderApp` notarytool Keychain Profile。
 
 ## 資料與隱私
 

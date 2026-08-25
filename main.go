@@ -16,7 +16,7 @@ import (
 var assets embed.FS
 
 func main() {
-	application := app.New()
+	services := app.New()
 
 	err := wails.Run(&options.App{
 		Title:            "FastFileViewer",
@@ -24,16 +24,17 @@ func main() {
 		Height:           920,
 		MinWidth:         960,
 		MinHeight:        560,
-		AssetServer:      &assetserver.Options{Assets: assets, Middleware: app.NewMediaMiddleware(application)},
+		AssetServer:      &assetserver.Options{Assets: assets, Middleware: app.NewMediaMiddleware(services.Media)},
 		DragAndDrop:      &options.DragAndDrop{EnableFileDrop: true},
 		BackgroundColour: &options.RGBA{R: 242, G: 244, B: 241, A: 1},
-		OnStartup:        application.Startup,
+		OnStartup:        services.Startup,
 		OnShutdown: func(context.Context) {
-			app.CleanupDownloads(application)
-			app.CleanupMediaCache(application)
+			services.Shutdown()
 		},
 		Bind: []interface{}{
-			application,
+			services.Library,
+			services.Media,
+			services.Download,
 		},
 	})
 	if err != nil {

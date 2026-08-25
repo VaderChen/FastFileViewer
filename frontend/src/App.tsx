@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent, CSSProperties, DragEvent, MouseEvent } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -15,9 +15,9 @@ import {
   faAngleDown,
   faAngleLeft,
   faAngleRight,
+  faArrowsRotate,
   faArrowsToEye,
   faBoxArchive,
-  faCheck,
   faClone,
   faCompress,
   faCircleCheck,
@@ -31,7 +31,6 @@ import {
   faImage,
   faLink,
   faMinus,
-  faMagnifyingGlass,
   faPlus,
   faRotateRight,
   faSpinner,
@@ -44,10 +43,17 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { ClipboardSetText, WindowFullscreen, WindowIsFullscreen, WindowSetTitle, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
 import { isMediaKind, isPlaybackMediaKind } from './types';
-import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadItem, DownloadResolution, DownloadStatus, DuplicateGroup, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ViewerMode, ZoomBehavior } from './types';
+import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
-import { filterWorkspaceEntries } from './workspaceFilters';
+import { replaceLibraryEntry } from './libraryTree';
+import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize } from './downloads';
+import { useDownloads } from './useDownloads';
+import { useImageViewer } from './useImageViewer';
+import { extractErrorMessage, isOperationCancelled } from './operations';
+import { useWorkspace } from './useWorkspace';
+import { ThumbnailCard } from './ThumbnailCard';
+import { formatBytes } from './format';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
 import { MediaPlayer } from './MediaPlayer';
 import { findNextAudioEntry, findSidecarSubtitle } from './mediaSupport';
@@ -118,6 +124,10 @@ const messages = {
     pickImage: '請從左側選擇圖片、文件或媒體',
     loadingMedia: '準備影音播放中',
     mediaPlaybackFailed: '無法播放此影音，可能是系統不支援該編碼格式',
+    mediaRemuxCleanupTitle: '改封裝完成',
+    mediaRemuxCleanupMessage: '「{name}」需要改封裝才能播放。要把改封裝後的檔案存到同一個資料夾，並把原始檔移到垃圾桶嗎？之後開啟就不必再轉換。',
+    mediaRemuxCleanupConfirm: '保存並移到垃圾桶',
+    mediaRemuxCleanupCancel: '保留原始檔',
     subtitleFailed: '字幕格式無法轉換或載入',
     mediaPlay: '播放',
     mediaPause: '暫停',
@@ -279,6 +289,10 @@ const messages = {
     pickImage: 'Choose an image, document, or media item on the left',
     loadingMedia: 'Preparing media playback',
     mediaPlaybackFailed: 'Unable to play this media. Its codec may not be supported by the system.',
+    mediaRemuxCleanupTitle: 'Remux complete',
+    mediaRemuxCleanupMessage: '"{name}" had to be remuxed before it could play. Save the remuxed file in the same folder and move the original to the Trash? Future playback will not need converting again.',
+    mediaRemuxCleanupConfirm: 'Save and move to Trash',
+    mediaRemuxCleanupCancel: 'Keep the original',
     subtitleFailed: 'Unable to convert or load the subtitle',
     mediaPlay: 'Play',
     mediaPause: 'Pause',
@@ -440,6 +454,10 @@ const messages = {
     pickImage: '左側で画像、文書、またはメディアを選択してください',
     loadingMedia: 'メディアを準備中',
     mediaPlaybackFailed: 'このメディアを再生できません。システムがコーデックに対応していない可能性があります。',
+    mediaRemuxCleanupTitle: 'コンテナ変換が完了しました',
+    mediaRemuxCleanupMessage: '「{name}」は再生のためにコンテナ変換が必要でした。変換後のファイルを同じフォルダに保存し、元のファイルをゴミ箱に移動しますか？次回からは変換が不要になります。',
+    mediaRemuxCleanupConfirm: '保存してゴミ箱へ移動',
+    mediaRemuxCleanupCancel: '元のファイルを残す',
     subtitleFailed: '字幕を変換または読み込みできません',
     mediaPlay: '再生',
     mediaPause: '一時停止',
@@ -594,7 +612,6 @@ const documentThemeStyles: Record<DocumentTheme, string> = {
   monokai: monokaiThemeCSS,
 };
 
-const workspacePageSize = 120;
 const libraryWidthLimits = { min: 480, default: 500, max: 720 };
 const maxImagePayloadCacheEntries = 5;
 const maxImagePayloadCacheBytes = 192 * 1024 * 1024;
@@ -670,9 +687,6 @@ export default function App() {
   const [documentPayload, setDocumentPayload] = useState<DocumentPayload | null>(null);
   const [documentViewMode, setDocumentViewMode] = useState<'preview' | 'raw'>('preview');
   const [retainedAudioEntry, setRetainedAudioEntry] = useState<ImageEntry | null>(null);
-  const [viewerMode, setViewerMode] = useState<ViewerMode>('fit');
-  const [rotation, setRotation] = useState(0);
-  const [zoom, setZoom] = useState(1);
   const [fullscreen, setFullscreen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [loadingImage, setLoadingImage] = useState(false);
@@ -680,9 +694,7 @@ export default function App() {
   const [scannedDirectories, setScannedDirectories] = useState(0);
   const [pendingDirectories, setPendingDirectories] = useState(0);
   const [currentScanPath, setCurrentScanPath] = useState('');
-  const [panning, setPanning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [libraryWidth, setLibraryWidth] = useState(() => {
     const storedWidth = Number(localStorage.getItem(storageKeys.libraryWidth));
     return Number.isFinite(storedWidth) && storedWidth >= libraryWidthLimits.min && storedWidth <= libraryWidthLimits.max
@@ -695,68 +707,79 @@ export default function App() {
     const storedTab = localStorage.getItem(storageKeys.librarySourceTab);
     return storedTab === 'pinned' || storedTab === 'downloads' ? storedTab : 'current';
   });
-  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
-  const [downloadURL, setDownloadURL] = useState('');
-  const [downloadDragActive, setDownloadDragActive] = useState(false);
-  const [downloadSubmitting, setDownloadSubmitting] = useState(false);
-  const [pendingDownloadResolutions, setPendingDownloadResolutions] = useState<DownloadResolution[]>([]);
-  const [selectedHLSURLs, setSelectedHLSURLs] = useState<Set<string>>(new Set());
-  const [downloadSelectionSubmitting, setDownloadSelectionSubmitting] = useState(false);
-  const [selectedWorkspaceImageIds, setSelectedWorkspaceImageIds] = useState<Set<string>>(new Set());
-  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
-  const [workspaceBusy, setWorkspaceBusy] = useState(false);
-  const [workspaceMessage, setWorkspaceMessage] = useState('');
-  const [workspaceQuery, setWorkspaceQuery] = useState('');
-  const [workspaceKindFilter, setWorkspaceKindFilter] = useState<WorkspaceKindFilter>('all');
-  const [workspaceSourceFilter, setWorkspaceSourceFilter] = useState<WorkspaceSourceFilter>('all');
-  const [workspaceDisplayLimit, setWorkspaceDisplayLimit] = useState(workspacePageSize);
-  const [workspaceLoadTarget, setWorkspaceLoadTarget] = useState<number | null>(null);
   const [activeChecksum, setActiveChecksum] = useState('');
   const [checksumBusy, setChecksumBusy] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('display');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [appInfo, setAppInfo] = useState<AppInfo>(fallbackAppInfo);
-  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
-  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const scanTokenRef = useRef(0);
   const scanOperationRef = useRef<number | null>(null);
-  const workspaceOperationRef = useRef<number | null>(null);
   const checksumOperationRef = useRef<number | null>(null);
   const imageLoadOperationRef = useRef<number | null>(null);
   const imagePrefetchOperationRef = useRef<number | null>(null);
   const cacheSaveTimerRef = useRef<number | null>(null);
-  const imageStageRef = useRef<HTMLElement | null>(null);
-  const dragPanRef = useRef({
-    active: false,
-    pointerId: 0,
-    startX: 0,
-    startY: 0,
-    scrollLeft: 0,
-    scrollTop: 0,
-  });
 
   const t = messages[locale];
   const pinnedDirectorySet = useMemo(() => new Set(pinnedDirectories), [pinnedDirectories]);
-  const currentDownloadResolution = pendingDownloadResolutions[0] ?? null;
+  const {
+    viewerMode,
+    setViewerMode,
+    rotateQuarterTurn,
+    displayZoom,
+    changeZoom,
+    resetZoom,
+    centerImage,
+    panning,
+    naturalSize: imageNaturalSize,
+    setNaturalSize: setImageNaturalSize,
+    stageRef: imageStageRef,
+    displayLayout: imageDisplayLayout,
+    resetView,
+    handlePanStart,
+    handlePanMove,
+    handlePanEnd,
+  } = useImageViewer({
+    zoomBehavior,
+    fullscreen,
+    imageId: imagePayload?.id,
+    panEnabled: Boolean(imagePayload),
+  });
+
+  const {
+    downloads,
+    downloadURL,
+    setDownloadURL,
+    dragActive: downloadDragActive,
+    setDragActive: setDownloadDragActive,
+    submitting: downloadSubmitting,
+    currentResolution: currentDownloadResolution,
+    selectedHLSURLs,
+    selectionSubmitting: downloadSelectionSubmitting,
+    submitURLs: submitDownloadURLs,
+    toggleHLSSelection,
+    selectAllHLSCandidates,
+    clearHLSSelection,
+    closeCurrentResolution: closeCurrentDownloadResolution,
+    confirmHLSSelection,
+    handlePaste: handleDownloadPaste,
+    handleDragOver: handleDownloadDragOver,
+    handleDrop: handleDownloadDrop,
+    cancel: cancelDownload,
+    remove: removeDownload,
+    reveal: revealDownload,
+    openDirectory: openDownloadsDirectory,
+  } = useDownloads({
+    panelVisible: librarySourceTab === 'downloads',
+    operationFailedLabel: t.operationFailed,
+    onError: setErrorMessage,
+  });
 
   useEffect(() => {
     WindowSetTitle(t.appName);
   }, [t.appName]);
 
-  useEffect(() => {
-    const firstCandidate = currentDownloadResolution?.candidates[0];
-    setSelectedHLSURLs(new Set(firstCandidate ? [firstCandidate.url] : []));
-  }, [currentDownloadResolution]);
-
   const closeContextMenu = () => {
     setContextMenu(null);
-  };
-
-  const refreshDownloads = async () => {
-    const items = await window.go?.app?.App?.ListDownloads?.();
-    if (items) {
-      setDownloads(items);
-    }
   };
 
   useEffect(() => {
@@ -867,21 +890,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void refreshDownloads().catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    const hasActiveDownload = downloads.some((item) => item.status === 'queued' || item.status === 'downloading');
-    if (librarySourceTab !== 'downloads' && !hasActiveDownload) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      void refreshDownloads().catch(() => undefined);
-    }, 750);
-    return () => window.clearInterval(timer);
-  }, [downloads, librarySourceTab]);
-
-  useEffect(() => {
     if (rootPath.trim()) {
       localStorage.setItem(storageKeys.rootPath, rootPath.trim());
     }
@@ -908,69 +916,46 @@ export default function App() {
     };
   }, [contextMenu]);
 
-  useEffect(() => {
-    const stage = imageStageRef.current;
-    if (!stage) {
-      return;
-    }
-
-    const updateStageSize = () => {
-      setStageSize({
-        width: stage.clientWidth,
-        height: stage.clientHeight,
-      });
-    };
-    updateStageSize();
-
-    const resizeObserver = new ResizeObserver(updateStageSize);
-    resizeObserver.observe(stage);
-    window.addEventListener('resize', updateStageSize);
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateStageSize);
-    };
-  }, [fullscreen, imagePayload]);
-
   const displayTree = useMemo(() => buildVisibleTree(tree), [tree]);
   const navigationImages = useMemo(() => (displayTree ? collectImageRefs(displayTree) : []), [displayTree]);
   const allLibraryImages = useMemo(() => (displayTree ? collectImages(displayTree) : []), [displayTree]);
-  const filteredWorkspaceImages = useMemo(
-    () => filterWorkspaceEntries(allLibraryImages, workspaceQuery, workspaceKindFilter, workspaceSourceFilter),
-    [allLibraryImages, workspaceKindFilter, workspaceQuery, workspaceSourceFilter],
-  );
-  const displayedWorkspaceImages = useMemo(
-    () => filteredWorkspaceImages.slice(0, workspaceDisplayLimit),
-    [filteredWorkspaceImages, workspaceDisplayLimit],
-  );
-  const selectedWorkspaceImages = useMemo(
-    () => allLibraryImages.filter((image) => selectedWorkspaceImageIds.has(image.id)),
-    [allLibraryImages, selectedWorkspaceImageIds],
-  );
-
-  useEffect(() => {
-    const validIds = new Set(allLibraryImages.map((image) => image.id));
-    setSelectedWorkspaceImageIds((current) => new Set(Array.from(current).filter((id) => validIds.has(id))));
-  }, [allLibraryImages]);
-
-  useEffect(() => {
-    setDuplicateGroups([]);
-    setWorkspaceDisplayLimit(workspacePageSize);
-    setWorkspaceLoadTarget(null);
-  }, [workspaceKindFilter, workspaceQuery, workspaceSourceFilter]);
-
-  useEffect(() => {
-    if (workspaceLoadTarget === null) {
-      return;
-    }
-    if (workspaceDisplayLimit >= workspaceLoadTarget) {
-      const timer = window.setTimeout(() => setWorkspaceLoadTarget(null), 320);
-      return () => window.clearTimeout(timer);
-    }
-    const frame = window.requestAnimationFrame(() => {
-      setWorkspaceDisplayLimit((current) => Math.min(workspaceLoadTarget, current + workspacePageSize));
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [workspaceDisplayLimit, workspaceLoadTarget]);
+  const {
+    open: workspaceOpen,
+    setOpen: setWorkspaceOpen,
+    query: workspaceQuery,
+    setQuery: setWorkspaceQuery,
+    kindFilter: workspaceKindFilter,
+    setKindFilter: setWorkspaceKindFilter,
+    sourceFilter: workspaceSourceFilter,
+    setSourceFilter: setWorkspaceSourceFilter,
+    selectedIds: selectedWorkspaceImageIds,
+    selectedImages: selectedWorkspaceImages,
+    filteredImages: filteredWorkspaceImages,
+    displayedImages: displayedWorkspaceImages,
+    duplicateGroups,
+    busy: workspaceBusy,
+    message: workspaceMessage,
+    loadTarget: workspaceLoadTarget,
+    loadingMore: workspaceLoadingMore,
+    toggleImage: toggleWorkspaceImage,
+    selectImage: selectWorkspaceImage,
+    selectAllFiltered: selectAllWorkspaceImages,
+    clearSelection: clearWorkspaceSelection,
+    loadMore: loadMoreWorkspaceImages,
+    loadAll: loadAllWorkspaceImages,
+    cancelLoadMore: cancelWorkspaceLoadMore,
+    exportSelected: handleExportSelected,
+    detectDuplicates: handleDetectDuplicates,
+    cancelOperation: handleCancelWorkspaceOperation,
+  } = useWorkspace({
+    libraryImages: allLibraryImages,
+    labels: {
+      exportDestination: t.exportDestination,
+      exportedSummary: t.exportedSummary,
+      noDuplicates: t.noDuplicates,
+      operationFailed: t.operationFailed,
+    },
+  });
 
   const selectedNode = useMemo(() => {
     if (!displayTree || !selectedNodeId) {
@@ -1030,11 +1015,7 @@ export default function App() {
     }
     setLoadingImage(true);
     setErrorMessage('');
-    setRotation(0);
-    if (zoomBehavior !== 'lockRatio') {
-      setZoom(1);
-    }
-    setImageNaturalSize({ width: 0, height: 0 });
+    resetView();
 
     if (selectedImageEntry && isPlaybackMediaKind(selectedImageEntry.kind)) {
       setImagePayload(null);
@@ -1281,142 +1262,6 @@ export default function App() {
     setLibrarySourceTab('current');
     setRootPath(directoryPath);
     void handleScan(directoryPath);
-  };
-
-  const submitDownloadURLs = async (rawValues: string[]) => {
-    const urls = Array.from(new Set(rawValues.flatMap(extractDownloadURLs)));
-    if (urls.length === 0 || downloadSubmitting) {
-      return;
-    }
-    setDownloadSubmitting(true);
-    setErrorMessage('');
-    const failures: string[] = [];
-    const resolutionsForSelection: DownloadResolution[] = [];
-    for (const url of urls) {
-      try {
-        if (shouldResolveDownloadPage(url) && window.go?.app?.App?.ResolveDownloadURL) {
-          const resolution = await window.go.app.App.ResolveDownloadURL(url);
-          if (resolution.candidates.length > 1) {
-            resolutionsForSelection.push(resolution);
-            continue;
-          }
-          if (resolution.candidates.length === 1 && window.go.app.App.StartResolvedDownload) {
-            await window.go.app.App.StartResolvedDownload(resolution.sourceUrl, resolution.candidates[0].url, resolution.name);
-            continue;
-          }
-        }
-        await window.go?.app?.App?.StartDownload?.(url);
-      } catch (error) {
-        failures.push(extractErrorMessage(error, t.operationFailed));
-      }
-    }
-    if (resolutionsForSelection.length > 0) {
-      setPendingDownloadResolutions((current) => [...current, ...resolutionsForSelection]);
-    }
-    await refreshDownloads().catch(() => undefined);
-    setDownloadSubmitting(false);
-    setDownloadURL('');
-    if (failures.length > 0) {
-      setErrorMessage(failures.join('\n'));
-    }
-  };
-
-  const toggleHLSSelection = (url: string) => {
-    setSelectedHLSURLs((current) => {
-      const next = new Set(current);
-      if (next.has(url)) {
-        next.delete(url);
-      } else {
-        next.add(url);
-      }
-      return next;
-    });
-  };
-
-  const closeCurrentDownloadResolution = () => {
-    if (downloadSelectionSubmitting) {
-      return;
-    }
-    setPendingDownloadResolutions((current) => current.slice(1));
-  };
-
-  const confirmHLSSelection = async () => {
-    if (!currentDownloadResolution || selectedHLSURLs.size === 0 || downloadSelectionSubmitting) {
-      return;
-    }
-    setDownloadSelectionSubmitting(true);
-    setErrorMessage('');
-    const failures: string[] = [];
-    for (const candidate of currentDownloadResolution.candidates) {
-      if (!selectedHLSURLs.has(candidate.url)) {
-        continue;
-      }
-      try {
-        await window.go?.app?.App?.StartResolvedDownload?.(
-          currentDownloadResolution.sourceUrl,
-          candidate.url,
-          currentDownloadResolution.name,
-        );
-      } catch (error) {
-        failures.push(extractErrorMessage(error, t.operationFailed));
-      }
-    }
-    await refreshDownloads().catch(() => undefined);
-    setDownloadSelectionSubmitting(false);
-    setPendingDownloadResolutions((current) => current.slice(1));
-    if (failures.length > 0) {
-      setErrorMessage(failures.join('\n'));
-    }
-  };
-
-  const handleDownloadPaste = (event: ClipboardEvent<HTMLElement>) => {
-    const value = event.clipboardData.getData('text/uri-list') || event.clipboardData.getData('text/plain');
-    if (extractDownloadURLs(value).length === 0) {
-      return;
-    }
-    event.preventDefault();
-    void submitDownloadURLs([value]);
-  };
-
-  const handleDownloadDragOver = (event: DragEvent<HTMLElement>) => {
-    if (!Array.from(event.dataTransfer.types).some((type) => type === 'text/uri-list' || type === 'text/plain')) {
-      return;
-    }
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
-    setDownloadDragActive(true);
-  };
-
-  const handleDownloadDrop = (event: DragEvent<HTMLElement>) => {
-    const value = event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain');
-    setDownloadDragActive(false);
-    if (extractDownloadURLs(value).length === 0) {
-      return;
-    }
-    event.preventDefault();
-    void submitDownloadURLs([value]);
-  };
-
-  const cancelDownload = async (id: string) => {
-    await window.go?.app?.App?.CancelDownload?.(id);
-    await refreshDownloads().catch(() => undefined);
-  };
-
-  const removeDownload = async (id: string) => {
-    try {
-      await window.go?.app?.App?.RemoveDownload?.(id);
-      await refreshDownloads();
-    } catch (error) {
-      setErrorMessage(extractErrorMessage(error, t.operationFailed));
-    }
-  };
-
-  const revealDownload = async (id: string) => {
-    try {
-      await window.go?.app?.App?.RevealDownload?.(id);
-    } catch (error) {
-      setErrorMessage(extractErrorMessage(error, t.operationFailed));
-    }
   };
 
   const handleStopScan = () => {
@@ -1773,31 +1618,6 @@ export default function App() {
     window.addEventListener('pointerup', handlePointerUp);
   };
 
-  const changeZoom = (delta: number) => {
-    if (viewerMode === 'fit') {
-      const fitZoom = calculateViewportScale(imageNaturalSize, stageSize, zoomBehavior) * zoom;
-      setViewerMode('actual');
-      setZoom(clampZoom(Math.round((fitZoom + delta) * 100) / 100));
-      return;
-    }
-    setZoom((current) => clampZoom(Math.round((current + delta) * 100) / 100));
-  };
-
-  const centerActualImage = () => {
-    window.requestAnimationFrame(() => {
-      const stage = imageStageRef.current;
-      if (!stage) {
-        return;
-      }
-      stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
-      stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
-    });
-  };
-
-  useEffect(() => {
-    centerActualImage();
-  }, [fullscreen, imagePayload?.id, viewerMode, zoom, zoomBehavior]);
-
   const enterViewFullscreen = async () => {
     WindowFullscreen();
     setFullscreen(true);
@@ -1853,7 +1673,7 @@ export default function App() {
       return;
     }
     setViewerMode('fit');
-    setZoom(1);
+    resetZoom();
   };
 
   const handleStageDoubleClick = () => {
@@ -1862,55 +1682,6 @@ export default function App() {
       return;
     }
     void enterViewFullscreen();
-  };
-
-  const handlePanStart = (event: React.PointerEvent<HTMLElement>) => {
-    if (!imagePayload || event.button !== 0) {
-      return;
-    }
-
-    const stage = event.currentTarget;
-    const canPan = stage.scrollWidth > stage.clientWidth || stage.scrollHeight > stage.clientHeight;
-    if (!canPan) {
-      return;
-    }
-
-    dragPanRef.current = {
-      active: true,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      scrollLeft: stage.scrollLeft,
-      scrollTop: stage.scrollTop,
-    };
-    stage.setPointerCapture(event.pointerId);
-    setPanning(true);
-    event.preventDefault();
-  };
-
-  const handlePanMove = (event: React.PointerEvent<HTMLElement>) => {
-    const drag = dragPanRef.current;
-    if (!drag.active || drag.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const stage = event.currentTarget;
-    stage.scrollLeft = drag.scrollLeft - (event.clientX - drag.startX);
-    stage.scrollTop = drag.scrollTop - (event.clientY - drag.startY);
-    event.preventDefault();
-  };
-
-  const handlePanEnd = (event: React.PointerEvent<HTMLElement>) => {
-    const drag = dragPanRef.current;
-    if (!drag.active || drag.pointerId !== event.pointerId) {
-      return;
-    }
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    dragPanRef.current.active = false;
-    setPanning(false);
   };
 
   const toggleExpanded = (nodeId: string) => {
@@ -1931,71 +1702,6 @@ export default function App() {
     setSelectedImageId(firstImage?.id ?? '');
     if (!firstImage) {
       setImagePayload(null);
-    }
-  };
-
-  const toggleWorkspaceImage = (imageId: string) => {
-    setSelectedWorkspaceImageIds((current) => {
-      const next = new Set(current);
-      if (next.has(imageId)) {
-        next.delete(imageId);
-      } else {
-        next.add(imageId);
-      }
-      return next;
-    });
-  };
-
-  const handleExportSelected = async () => {
-    if (selectedWorkspaceImages.length === 0) {
-      return;
-    }
-    setWorkspaceBusy(true);
-    setWorkspaceMessage('');
-    try {
-      const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-      workspaceOperationRef.current = operationId;
-      const result = await window.go?.app?.App?.ExportImages?.(selectedWorkspaceImages, t.exportDestination, operationId);
-      if (result) {
-        setWorkspaceMessage(`${t.exportedSummary}: ${result.exported.toLocaleString()} · ${result.destination}`);
-      }
-    } catch (error) {
-      if (!isOperationCancelled(error)) {
-        setWorkspaceMessage(extractErrorMessage(error, t.operationFailed));
-      }
-    } finally {
-      workspaceOperationRef.current = null;
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const handleDetectDuplicates = async () => {
-    if (filteredWorkspaceImages.length === 0) {
-      return;
-    }
-    setWorkspaceBusy(true);
-    setWorkspaceMessage('');
-    try {
-      const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-      workspaceOperationRef.current = operationId;
-      const groups = await window.go?.app?.App?.DetectDuplicates?.(filteredWorkspaceImages, operationId);
-      setDuplicateGroups(groups ?? []);
-      if (!groups || groups.length === 0) {
-        setWorkspaceMessage(t.noDuplicates);
-      }
-    } catch (error) {
-      if (!isOperationCancelled(error)) {
-        setWorkspaceMessage(extractErrorMessage(error, t.operationFailed));
-      }
-    } finally {
-      workspaceOperationRef.current = null;
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const handleCancelWorkspaceOperation = () => {
-    if (workspaceOperationRef.current !== null) {
-      void window.go?.app?.App?.CancelOperation?.(workspaceOperationRef.current);
     }
   };
 
@@ -2050,11 +1756,19 @@ export default function App() {
   const totalDocuments = allLibraryImages.filter((entry) => entry.kind !== 'image' && !isMediaKind(entry.kind)).length;
   const totalMedia = allLibraryImages.filter((entry) => isMediaKind(entry.kind)).length;
   const totalArchives = displayTree ? countArchives(displayTree) : 0;
-  const imageDisplayStyle = buildImageDisplayStyle(viewerMode, zoomBehavior, imageNaturalSize, stageSize, zoom, rotation);
-  const displayZoom = viewerMode === 'fit' ? calculateViewportScale(imageNaturalSize, stageSize, zoomBehavior) * zoom : zoom;
+  // 原始影片移到垃圾桶後，用保存下來的新檔就地取代清單項目，不必重新掃描整個資料庫。
+  const handleOriginalReplaced = (replacement: ImageEntry, replacedEntryId: string) => {
+    setTree((current) => (current ? replaceLibraryEntry(current, replacedEntryId, replacement) : current));
+    setSelectedImageId((current) => (current === replacedEntryId ? replacement.id : current));
+  };
+
   const mediaPlayerLabels = {
     loading: t.loadingMedia,
     playbackFailed: t.mediaPlaybackFailed,
+    remuxCleanupTitle: t.mediaRemuxCleanupTitle,
+    remuxCleanupMessage: t.mediaRemuxCleanupMessage,
+    remuxCleanupConfirm: t.mediaRemuxCleanupConfirm,
+    remuxCleanupCancel: t.mediaRemuxCleanupCancel,
     subtitleFailed: t.subtitleFailed,
     play: t.mediaPlay,
     pause: t.mediaPause,
@@ -2130,7 +1844,7 @@ export default function App() {
             </button>
           ) : (
             <button className="icon-button" type="button" title={t.scan} onClick={() => void handleScan()}>
-              <FontAwesomeIcon icon={faMagnifyingGlass} />
+              <FontAwesomeIcon icon={faArrowsRotate} />
             </button>
           )}
         </div>
@@ -2189,7 +1903,7 @@ export default function App() {
                   <strong>{t.downloads}</strong>
                   <span>{t.downloadsHint}</span>
                 </div>
-                <button className="icon-button" type="button" title={t.openDownloadsFolder} onClick={() => void window.go?.app?.App?.OpenDownloadsDirectory?.()}>
+                <button className="icon-button" type="button" title={t.openDownloadsFolder} onClick={openDownloadsDirectory}>
                   <FontAwesomeIcon icon={faFolderOpen} />
                 </button>
               </header>
@@ -2366,7 +2080,7 @@ export default function App() {
               <FontAwesomeIcon icon={fullscreen ? faCompress : faExpand} />
             </button>
             {activeIsImage ? (
-              <button className="icon-button" type="button" title={t.rotate} onClick={() => setRotation((current) => (current + 90) % 360)} disabled={!imagePayload}>
+              <button className="icon-button" type="button" title={t.rotate} onClick={rotateQuarterTurn} disabled={!imagePayload}>
                 <FontAwesomeIcon icon={faRotateRight} />
               </button>
             ) : null}
@@ -2490,21 +2204,27 @@ export default function App() {
               entry={activeImage}
               subtitle={activeSubtitle}
               labels={mediaPlayerLabels}
+              onOriginalReplaced={handleOriginalReplaced}
             />
           ) : activeAudioEntry ? null : imagePayload ? (
-            <img
-              src={imagePayload.dataUri}
-              alt={imagePayload.name}
-              onLoad={(event) => {
-                setImageNaturalSize({
-                  width: event.currentTarget.naturalWidth,
-                  height: event.currentTarget.naturalHeight,
-                });
-                centerActualImage();
-              }}
-              style={imageDisplayStyle}
-              draggable={false}
-            />
+            <div
+              className={`image-pan-surface ${imageNaturalSize.width > 0 && imageNaturalSize.height > 0 ? 'ready' : ''}`}
+              style={imageDisplayLayout.surfaceStyle}
+            >
+              <img
+                src={imagePayload.dataUri}
+                alt={imagePayload.name}
+                onLoad={(event) => {
+                  setImageNaturalSize({
+                    width: event.currentTarget.naturalWidth,
+                    height: event.currentTarget.naturalHeight,
+                  });
+                  centerImage();
+                }}
+                style={imageDisplayLayout.imageStyle}
+                draggable={false}
+              />
+            </div>
           ) : (
             <div className="empty-state">
               <FontAwesomeIcon icon={faImage} />
@@ -2577,12 +2297,12 @@ export default function App() {
                   <button
                     className="workspace-action"
                     type="button"
-                    onClick={() => setSelectedWorkspaceImageIds((current) => new Set([...current, ...filteredWorkspaceImages.map((image) => image.id)]))}
+                    onClick={selectAllWorkspaceImages}
                     disabled={filteredWorkspaceImages.length === 0}
                   >
                     {t.selectFiltered}
                   </button>
-                  <button className="workspace-action" type="button" onClick={() => setSelectedWorkspaceImageIds(new Set())} disabled={selectedWorkspaceImages.length === 0}>
+                  <button className="workspace-action" type="button" onClick={clearWorkspaceSelection} disabled={selectedWorkspaceImages.length === 0}>
                     {t.clearSelection}
                   </button>
                   <button className="workspace-action primary" type="button" onClick={() => void handleExportSelected()} disabled={workspaceBusy || selectedWorkspaceImages.length === 0}>
@@ -2630,16 +2350,16 @@ export default function App() {
                         <button
                           className="thumbnail-grid-more"
                           type="button"
-                          disabled={workspaceLoadTarget !== null}
-                          onClick={() => setWorkspaceLoadTarget(Math.min(workspaceDisplayLimit + workspacePageSize, filteredWorkspaceImages.length))}
+                          disabled={workspaceLoadingMore}
+                          onClick={loadMoreWorkspaceImages}
                         >
                           {t.loadMore} ({displayedWorkspaceImages.length.toLocaleString()} / {filteredWorkspaceImages.length.toLocaleString()})
                         </button>
                         <button
                           className="thumbnail-grid-more secondary"
                           type="button"
-                          disabled={workspaceLoadTarget !== null}
-                          onClick={() => setWorkspaceLoadTarget(filteredWorkspaceImages.length)}
+                          disabled={workspaceLoadingMore}
+                          onClick={loadAllWorkspaceImages}
                         >
                           {t.loadAll}
                         </button>
@@ -2682,7 +2402,7 @@ export default function App() {
                         type="button"
                         key={image.id}
                         onClick={() => {
-                          setSelectedWorkspaceImageIds((current) => new Set(current).add(image.id));
+                          selectWorkspaceImage(image.id);
                           setSelectedImageId(image.id);
                         }}
                       >
@@ -2705,7 +2425,7 @@ export default function App() {
             <span>{t.loadingItemsHint}</span>
             <progress value={displayedWorkspaceImages.length} max={workspaceLoadTarget} />
             <em>{displayedWorkspaceImages.length.toLocaleString()} / {workspaceLoadTarget.toLocaleString()}</em>
-            <button className="workspace-action" type="button" onClick={() => setWorkspaceLoadTarget(null)}>
+            <button className="workspace-action" type="button" onClick={cancelWorkspaceLoadMore}>
               <FontAwesomeIcon icon={faStop} />
               {t.cancelOperation}
             </button>
@@ -2736,8 +2456,8 @@ export default function App() {
             <p>{t.selectStreamsHint}</p>
             <small className="download-selection-source" title={currentDownloadResolution.sourceUrl}>{currentDownloadResolution.sourceUrl}</small>
             <div className="download-selection-tools">
-              <button type="button" onClick={() => setSelectedHLSURLs(new Set(currentDownloadResolution.candidates.map((candidate) => candidate.url)))}>{t.selectAll}</button>
-              <button type="button" onClick={() => setSelectedHLSURLs(new Set())}>{t.clearAll}</button>
+              <button type="button" onClick={selectAllHLSCandidates}>{t.selectAll}</button>
+              <button type="button" onClick={clearHLSSelection}>{t.clearAll}</button>
             </div>
             <div className="download-selection-list">
               {currentDownloadResolution.candidates.map((candidate, index) => (
@@ -2978,137 +2698,6 @@ interface TreeNodeProps {
   onTogglePinned: (directoryPath: string) => void;
   onOpenNodeContextMenu: (event: MouseEvent<HTMLElement>, node: LibraryNode) => void;
   onOpenImageContextMenu: (event: MouseEvent<HTMLElement>, node: LibraryNode, image: ImageEntry) => void;
-}
-
-interface ThumbnailCardProps {
-  image: ImageEntry;
-  active: boolean;
-  selected: boolean;
-  archiveLabel: string;
-  folderLabel: string;
-  onToggle: () => void;
-  onOpen: () => void;
-}
-
-const thumbnailCache = new Map<string, string>();
-const maxThumbnailCacheEntries = 200;
-const thumbnailVisibilityCallbacks = new WeakMap<Element, () => void>();
-let thumbnailVisibilityObserver: IntersectionObserver | null = null;
-
-function observeThumbnailVisibility(element: Element, onVisible: () => void) {
-  if (!thumbnailVisibilityObserver) {
-    thumbnailVisibilityObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) {
-            return;
-          }
-          const callback = thumbnailVisibilityCallbacks.get(entry.target);
-          thumbnailVisibilityObserver?.unobserve(entry.target);
-          thumbnailVisibilityCallbacks.delete(entry.target);
-          callback?.();
-        });
-      },
-      { rootMargin: '400px' },
-    );
-  }
-  thumbnailVisibilityCallbacks.set(element, onVisible);
-  thumbnailVisibilityObserver.observe(element);
-  return () => {
-    thumbnailVisibilityObserver?.unobserve(element);
-    thumbnailVisibilityCallbacks.delete(element);
-  };
-}
-
-function getCachedThumbnail(path: string): string {
-  const thumbnail = thumbnailCache.get(path);
-  if (!thumbnail) {
-    return '';
-  }
-  thumbnailCache.delete(path);
-  thumbnailCache.set(path, thumbnail);
-  return thumbnail;
-}
-
-function ThumbnailCard({ image, active, selected, archiveLabel, folderLabel, onToggle, onOpen }: ThumbnailCardProps) {
-  const cardRef = useRef<HTMLElement | null>(null);
-  const [visible, setVisible] = useState(image.kind !== 'image');
-  const [thumbnail, setThumbnail] = useState(() => getCachedThumbnail(image.path));
-  const [thumbnailStatus, setThumbnailStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>(() => thumbnail ? 'ready' : 'idle');
-
-  useEffect(() => {
-    if (image.kind !== 'image' || visible) {
-      return;
-    }
-    const card = cardRef.current;
-    if (!card) {
-      return;
-    }
-    return observeThumbnailVisibility(card, () => setVisible(true));
-  }, [image.kind, visible]);
-
-  useEffect(() => {
-    if (image.kind !== 'image' || !visible) {
-      setThumbnail('');
-      return;
-    }
-    const cached = getCachedThumbnail(image.path);
-    if (cached) {
-      setThumbnail(cached);
-      setThumbnailStatus('ready');
-      return;
-    }
-    let cancelled = false;
-    setThumbnailStatus('loading');
-    void window.go?.app?.App?.LoadThumbnailByPath?.(image.path, 280)
-      .then((payload) => {
-        if (!cancelled && payload?.dataUri) {
-          thumbnailCache.set(image.path, payload.dataUri);
-          while (thumbnailCache.size > maxThumbnailCacheEntries) {
-            const oldestKey = thumbnailCache.keys().next().value;
-            if (typeof oldestKey !== 'string') {
-              break;
-            }
-            thumbnailCache.delete(oldestKey);
-          }
-          setThumbnail(payload.dataUri);
-          setThumbnailStatus('ready');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setThumbnailStatus('failed');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [image.kind, image.path, visible]);
-
-  return (
-    <article ref={cardRef} className={`thumbnail-card ${active ? 'active' : ''} ${selected ? 'selected' : ''}`} onDoubleClick={onOpen}>
-      <button className="thumbnail-select" type="button" onClick={onToggle} aria-pressed={selected}>
-        {selected ? <FontAwesomeIcon icon={faCheck} /> : null}
-      </button>
-      <button className="thumbnail-preview" type="button" onClick={onOpen}>
-        {image.kind !== 'image' ? (
-          <div className={`document-thumbnail ${image.kind}`}>
-            <FontAwesomeIcon icon={faFileLines} />
-            <strong>{image.format.replace('.', '').toUpperCase()}</strong>
-          </div>
-        ) : thumbnailStatus === 'ready' && thumbnail ? <img src={thumbnail} alt="" draggable={false} loading="lazy" />
-          : thumbnailStatus === 'loading' ? <FontAwesomeIcon icon={faSpinner} spin />
-            : <FontAwesomeIcon icon={faImage} />}
-      </button>
-      <div className="thumbnail-details">
-        <strong title={image.name}>{image.name}</strong>
-        <span>
-          <FontAwesomeIcon icon={image.source === 'archive' ? faBoxArchive : faFolder} />
-          {image.source === 'archive' ? archiveLabel : folderLabel} · {formatBytes(image.size)}
-        </span>
-      </div>
-    </article>
-  );
 }
 
 function CodeHighlight({ code, language, truncatedLabel }: { code: string; language: string; truncatedLabel: string }) {
@@ -3581,84 +3170,11 @@ function writeLibrarySelection(selection: PersistedLibrarySelection) {
   }
 }
 
-function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === 'string') {
-    return error;
-  }
-  return fallback;
-}
-
-function isOperationCancelled(error: unknown): boolean {
-  return extractErrorMessage(error, '').includes('操作已取消');
-}
-
 function formatResolution(naturalSize: { width: number; height: number }): string {
   if (naturalSize.width <= 0 || naturalSize.height <= 0) {
     return '';
   }
   return `${naturalSize.width} x ${naturalSize.height}`;
-}
-
-function formatBytes(size: number): string {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function extractDownloadURLs(value: string): string[] {
-  const matches = value.match(/https?:\/\/[^\s<>"']+/gi) ?? [];
-  const urls: string[] = [];
-  for (const match of matches) {
-    const candidate = match.replace(/[.,;]+$/, '');
-    try {
-      const parsed = new URL(candidate);
-      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname) {
-        urls.push(parsed.toString());
-      }
-    } catch {
-      continue;
-    }
-  }
-  return urls;
-}
-
-function shouldResolveDownloadPage(rawURL: string): boolean {
-  try {
-    const parsed = new URL(rawURL);
-    const path = parsed.pathname.toLowerCase();
-    const filename = path.split('/').filter(Boolean).pop() ?? '';
-    const extensionMatch = filename.match(/(\.[a-z0-9]{1,10})$/);
-    if (!extensionMatch) {
-      return true;
-    }
-    return ['.html', '.htm', '.php', '.asp', '.aspx', '.jsp'].includes(extensionMatch[1]);
-  } catch {
-    return false;
-  }
-}
-
-function downloadCandidateDisplayURL(rawURL: string): string {
-  try {
-    const parsed = new URL(rawURL);
-    return `${parsed.hostname}${decodeURIComponent(parsed.pathname)}`;
-  } catch {
-    return rawURL;
-  }
-}
-
-function downloadHost(rawURL: string): string {
-  try {
-    return new URL(rawURL).hostname;
-  } catch {
-    return rawURL;
-  }
 }
 
 function downloadStatusLabel(status: DownloadStatus, labels: (typeof messages)[LocaleCode]): string {
@@ -3670,19 +3186,6 @@ function downloadStatusLabel(status: DownloadStatus, labels: (typeof messages)[L
     cancelled: 'downloadCancelled',
   };
   return labels[keys[status]];
-}
-
-function formatDownloadSize(size: number): string {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / 1024 / 1024).toFixed(1)} MB`;
-  }
-  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 async function writeImagePayloadToClipboard(payload: ImagePayload): Promise<void> {
@@ -3732,53 +3235,6 @@ function dataUriToPngBlob(dataUri: string): Promise<Blob> {
     image.onerror = () => reject(new Error('Image clipboard conversion failed'));
     image.src = dataUri;
   });
-}
-
-function buildImageDisplayStyle(
-  viewerMode: ViewerMode,
-  zoomBehavior: ZoomBehavior,
-  naturalSize: { width: number; height: number },
-  stageSize: { width: number; height: number },
-  zoom: number,
-  rotation: number,
-): CSSProperties {
-  if (naturalSize.width <= 0 || naturalSize.height <= 0) {
-    return { transform: `rotate(${rotation}deg)` };
-  }
-
-  const baseScale = viewerMode === 'fit' ? calculateViewportScale(naturalSize, stageSize, zoomBehavior) : 1;
-  const displayScale = Math.max(0.01, baseScale * zoom);
-
-  return {
-    width: naturalSize.width * displayScale,
-    height: naturalSize.height * displayScale,
-    maxWidth: 'none',
-    maxHeight: 'none',
-    flex: '0 0 auto',
-    transform: `rotate(${rotation}deg)`,
-  };
-}
-
-function calculateViewportScale(
-  naturalSize: { width: number; height: number },
-  stageSize: { width: number; height: number },
-  zoomBehavior: ZoomBehavior,
-): number {
-  if (naturalSize.width <= 0 || naturalSize.height <= 0 || stageSize.width <= 0 || stageSize.height <= 0) {
-    return 1;
-  }
-  if (zoomBehavior === 'lockRatio') {
-    return 1;
-  }
-  const fitScale = Math.min(stageSize.width / naturalSize.width, stageSize.height / naturalSize.height);
-  if (zoomBehavior === 'shrinkLarge') {
-    return Math.min(1, fitScale);
-  }
-  return fitScale;
-}
-
-function clampZoom(value: number): number {
-  return Math.min(8, Math.max(0.1, value));
 }
 
 function clampContextMenuPosition(x: number, y: number): { x: number; y: number } {

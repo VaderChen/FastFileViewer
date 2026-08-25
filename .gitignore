@@ -9,7 +9,8 @@
 # 本機設定與敏感資料
 .env
 .env.*
-/cert/
+/cert/*
+!/cert/README.md
 /data/
 *.p12
 *.key

@@ -7,6 +7,7 @@ LOCAL_BUILD_CACHE="${FASTFILEVIEWER_BUILD_CACHE:-${TMPDIR:-/tmp}/fastfileviewer-
 
 rm -rf \
   "$SCRIPT_DIR/build/bin" \
+  "$SCRIPT_DIR/dist" \
   "$SCRIPT_DIR/build/tools" \
   "$SCRIPT_DIR/dist" \
   "$SCRIPT_DIR/frontend/dist" \

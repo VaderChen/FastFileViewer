@@ -27,7 +27,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -174,91 +173,67 @@ var supportedArchiveExtensions = []string{
 	".tar.gz",
 }
 
+// App 是圖庫服務：掃描、縮圖、文件讀取與可取消操作的進入點。
 type App struct {
-	ctx             context.Context
-	imageMu         sync.Mutex
-	lastImages      map[string]ImageEntry
-	mediaCacheMu    sync.Mutex
-	mediaCacheDir   string
-	mediaCacheFiles map[string]string
-	thumbnailOnce   sync.Once
-	libraryCacheMu  sync.Mutex
-	operationMu     sync.Mutex
-	operations      map[int64]operationState
-	nextOperationID atomic.Int64
-	downloadMu      sync.Mutex
-	downloadPersist sync.Mutex
-	downloads       map[string]*DownloadItem
-	downloadOrder   []string
-	downloadCancels map[string]context.CancelFunc
-	nextDownloadID  atomic.Int64
+	ctx            context.Context
+	entries        *entryRegistry
+	operations     *operationRegistry
+	media          *MediaService
+	thumbnailOnce  sync.Once
+	libraryCacheMu sync.Mutex
 }
 
-type operationState struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+// Services 是綁定到前端的服務集合，各自持有自己的狀態與鎖。
+type Services struct {
+	Library  *App
+	Media    *MediaService
+	Download *DownloadService
 }
 
-func New() *App {
-	return &App{
-		lastImages:      make(map[string]ImageEntry),
-		mediaCacheFiles: make(map[string]string),
-		operations:      make(map[int64]operationState),
-		downloads:       make(map[string]*DownloadItem),
-		downloadCancels: make(map[string]context.CancelFunc),
+// New 會建立互相串接好的服務集合。
+func New() *Services {
+	entries := newEntryRegistry()
+	operations := newOperationRegistry()
+	media := newMediaService(entries, operations)
+	return &Services{
+		Library:  &App{entries: entries, operations: operations, media: media},
+		Media:    media,
+		Download: newDownloadService(),
 	}
+}
+
+// Startup 會把應用程式生命週期傳給每一個服務。
+func (s *Services) Startup(ctx context.Context) {
+	s.Library.Startup(ctx)
+	s.Media.Startup(ctx)
+	s.Download.Startup(ctx)
+}
+
+// Shutdown 會釋放各服務持有的暫存資源。
+func (s *Services) Shutdown() {
+	s.Download.cleanup()
+	s.Media.cleanup()
 }
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
-	a.loadDownloads()
+	a.operations.adopt(ctx)
 }
 
 func (a *App) BeginOperation() int64 {
-	operationID := a.nextOperationID.Add(1)
-	parent := a.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithCancel(parent)
-	a.operationMu.Lock()
-	a.operations[operationID] = operationState{ctx: ctx, cancel: cancel}
-	a.operationMu.Unlock()
-	return operationID
+	return a.operations.begin()
 }
 
 func (a *App) CancelOperation(operationID int64) {
-	a.operationMu.Lock()
-	operation := a.operations[operationID]
-	a.operationMu.Unlock()
-	if operation.cancel != nil {
-		operation.cancel()
-	}
+	a.operations.cancel(operationID)
 }
 
 func (a *App) FinishOperation(operationID int64) {
-	a.operationMu.Lock()
-	operation := a.operations[operationID]
-	delete(a.operations, operationID)
-	a.operationMu.Unlock()
-	if operation.cancel != nil {
-		operation.cancel()
-	}
+	a.operations.finish(operationID)
 }
 
 func (a *App) operationContext(operationID int64) context.Context {
-	if operationID == 0 {
-		return context.Background()
-	}
-	a.operationMu.Lock()
-	operation, ok := a.operations[operationID]
-	a.operationMu.Unlock()
-	if !ok || operation.ctx == nil {
-		ctx, stop := context.WithCancel(context.Background())
-		stop()
-		return ctx
-	}
-	return operation.ctx
+	return a.operations.context(operationID)
 }
 
 func (a *App) Bootstrap() BootstrapPayload {
@@ -554,10 +529,8 @@ func (a *App) CalculateChecksum(entry ImageEntry, operationID int64) (string, er
 }
 
 func (a *App) ResetLibrary() {
-	a.imageMu.Lock()
-	a.lastImages = make(map[string]ImageEntry)
-	a.imageMu.Unlock()
-	a.cleanupMediaCache()
+	a.entries.reset()
+	a.media.cleanup()
 }
 
 func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []string, enabledDocumentExtensions []string, enabledMediaExtensions []string, operationID int64) (DirectoryScanResult, error) {
@@ -657,9 +630,7 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 }
 
 func (a *App) LoadImage(id string) (ImagePayload, error) {
-	a.imageMu.Lock()
-	entry, ok := a.lastImages[id]
-	a.imageMu.Unlock()
+	entry, ok := a.entries.lookup(id)
 	if !ok {
 		return ImagePayload{}, fmt.Errorf("找不到圖片: %s", id)
 	}
@@ -684,9 +655,7 @@ func (a *App) LoadImageByPathWithOperation(filePath string, operationID int64) (
 }
 
 func (a *App) rememberImage(image ImageEntry) {
-	a.imageMu.Lock()
-	defer a.imageMu.Unlock()
-	a.lastImages[image.ID] = image
+	a.entries.remember(image)
 }
 
 func libraryCachePath(rootPath string) (string, error) {

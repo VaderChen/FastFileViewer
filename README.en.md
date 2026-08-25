@@ -23,11 +23,12 @@
 - Audio support covers MP2/MP3, M4A/M4B/ALAC, WAV, AAC, FLAC, OGG/OPUS, AIFF, CAF, WMA, APE, WavPack, AC-3, AMR, and MKA.
 - FLAC uses native WebKit decoding first and automatically falls back to a temporary compatible M4A when native decoding fails.
 - Play MKV files through automatic temporary MP4 remuxing or transcoding when a local `ffmpeg` installation is available.
+- After a successful MKV remux, optionally save the playable file beside the original and move the original to the Trash so future playback needs no conversion.
 - Automatically attach matching VTT, SRT, ASS, SSA, SMI, and text-based SUB sidecar subtitles.
 - Paste or drop a public HTTP/HTTPS URL into Downloads to fetch images, videos, articles, and regular files; directly accessible video pages resolve `.m3u8` URLs from HTML and inline scripts.
 - A single embedded `.m3u8` starts automatically; multiple candidates open a multi-select dialog and create one download per selection.
 - Download unencrypted, completed `.m3u8` VOD playlists; master playlists select and merge the highest-bandwidth variant.
-- Configure image, document, media, and subtitle scan formats independently.
+- Configure image, document, and media/subtitle scan formats independently.
 - Use a three-pane workspace with persistent pinned folders, batch loading, and cancellable operations.
 - Export selections across folders and archives, calculate SHA-256, and detect byte-identical duplicates.
 - Persist library indexes, thumbnails, and adjacent-image caches locally without a network service.
@@ -62,9 +63,11 @@ The development script mirrors the project into a local temporary directory to a
 ./build.sh
 ```
 
-The output is `build/bin/FastFileViewer.app`. The build runs Go and frontend verification and bundles GPLv3, complete third-party license texts, notices, and traceable Git build metadata under `Contents/Resources`.
+The output is `dist/FastFileViewer.app`. The build runs Go and frontend verification and bundles GPLv3, complete third-party license texts, notices, and traceable Git build metadata under `Contents/Resources`.
 
 Prebuilt downloads and SHA-256 checksum files are available from [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases).
+
+To create a Developer ID-signed and Apple-notarized DMG, run or double-click `package-dmg.command`; with no arguments it uses the existing `dist/FastFileViewer.app`. Use `./package-dmg.command --build` for a formal tagged rebuild, which requires a clean worktree and exact tag. The DMG workflow does not require an App Store provisioning profile and automatically discovers the available `VaderApp` notarytool Keychain Profile.
 
 ## Privacy and Security
 

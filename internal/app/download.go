@@ -22,6 +22,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -71,7 +73,30 @@ type hlsPlaylist struct {
 
 type downloadRefererContextKey struct{}
 
-func (a *App) StartDownload(rawURL string) (DownloadItem, error) {
+// DownloadService 負責下載佇列與歷史紀錄，狀態完全獨立於圖庫與媒體服務。
+type DownloadService struct {
+	ctx             context.Context
+	downloadMu      sync.Mutex
+	downloadPersist sync.Mutex
+	downloads       map[string]*DownloadItem
+	downloadOrder   []string
+	downloadCancels map[string]context.CancelFunc
+	nextDownloadID  atomic.Int64
+}
+
+func newDownloadService() *DownloadService {
+	return &DownloadService{
+		downloads:       make(map[string]*DownloadItem),
+		downloadCancels: make(map[string]context.CancelFunc),
+	}
+}
+
+func (d *DownloadService) Startup(ctx context.Context) {
+	d.ctx = ctx
+	d.loadDownloads()
+}
+
+func (d *DownloadService) StartDownload(rawURL string) (DownloadItem, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	validationContext, cancelValidation := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelValidation()
@@ -80,17 +105,17 @@ func (a *App) StartDownload(rawURL string) (DownloadItem, error) {
 		return DownloadItem{}, err
 	}
 
-	item, downloadContext, err := a.enqueueDownload(parsedURL, downloadNameFromURL(parsedURL))
+	item, downloadContext, err := d.enqueueDownload(parsedURL, downloadNameFromURL(parsedURL))
 	if err != nil {
 		return DownloadItem{}, err
 	}
-	go a.runDownloadTask(downloadContext, item, func(client *http.Client, directory string) error {
-		return a.downloadToDirectory(downloadContext, client, item.ID, parsedURL.String(), directory)
+	go d.runDownloadTask(downloadContext, item, func(client *http.Client, directory string) error {
+		return d.downloadToDirectory(downloadContext, client, item.ID, parsedURL.String(), directory)
 	})
 	return item, nil
 }
 
-func (a *App) ResolveDownloadURL(rawURL string) (DownloadResolution, error) {
+func (d *DownloadService) ResolveDownloadURL(rawURL string) (DownloadResolution, error) {
 	validationContext, cancelValidation := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelValidation()
 	parsedURL, err := validatePublicDownloadURL(validationContext, strings.TrimSpace(rawURL))
@@ -102,7 +127,7 @@ func (a *App) ResolveDownloadURL(rawURL string) (DownloadResolution, error) {
 	return resolveDownloadPage(validationContext, client, parsedURL)
 }
 
-func (a *App) StartResolvedDownload(sourceURL string, hlsURL string, preferredName string) (DownloadItem, error) {
+func (d *DownloadService) StartResolvedDownload(sourceURL string, hlsURL string, preferredName string) (DownloadItem, error) {
 	validationContext, cancelValidation := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelValidation()
 	parsedSourceURL, err := validatePublicDownloadURL(validationContext, strings.TrimSpace(sourceURL))
@@ -120,18 +145,18 @@ func (a *App) StartResolvedDownload(sourceURL string, hlsURL string, preferredNa
 	if preferredName == "" || preferredName == "download" {
 		preferredName = strings.TrimSuffix(downloadNameFromURL(parsedSourceURL), filepath.Ext(downloadNameFromURL(parsedSourceURL)))
 	}
-	item, downloadContext, err := a.enqueueDownload(parsedSourceURL, preferredName)
+	item, downloadContext, err := d.enqueueDownload(parsedSourceURL, preferredName)
 	if err != nil {
 		return DownloadItem{}, err
 	}
-	go a.runDownloadTask(downloadContext, item, func(client *http.Client, directory string) error {
-		return a.downloadResolvedHLS(downloadContext, client, item.ID, parsedHLSURL.String(), directory, redactedDownloadURL(parsedSourceURL), preferredName)
+	go d.runDownloadTask(downloadContext, item, func(client *http.Client, directory string) error {
+		return d.downloadResolvedHLS(downloadContext, client, item.ID, parsedHLSURL.String(), directory, redactedDownloadURL(parsedSourceURL), preferredName)
 	})
 	return item, nil
 }
 
-func (a *App) enqueueDownload(parsedURL *url.URL, name string) (DownloadItem, context.Context, error) {
-	id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), a.nextDownloadID.Add(1))
+func (d *DownloadService) enqueueDownload(parsedURL *url.URL, name string) (DownloadItem, context.Context, error) {
+	id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), d.nextDownloadID.Add(1))
 	item := DownloadItem{
 		ID:        id,
 		URL:       redactedDownloadURL(parsedURL),
@@ -139,76 +164,76 @@ func (a *App) enqueueDownload(parsedURL *url.URL, name string) (DownloadItem, co
 		Status:    "queued",
 		CreatedAt: time.Now().UnixMilli(),
 	}
-	parent := a.ctx
+	parent := d.ctx
 	if parent == nil {
 		parent = context.Background()
 	}
 	downloadContext, cancelDownload := context.WithCancel(parent)
 
-	a.downloadMu.Lock()
-	a.downloads[id] = &item
-	a.downloadOrder = append([]string{id}, a.downloadOrder...)
-	a.downloadCancels[id] = cancelDownload
-	a.downloadMu.Unlock()
-	if err := a.persistDownloads(); err != nil {
-		a.downloadMu.Lock()
-		delete(a.downloads, id)
-		delete(a.downloadCancels, id)
-		a.downloadOrder = removeDownloadID(a.downloadOrder, id)
-		a.downloadMu.Unlock()
+	d.downloadMu.Lock()
+	d.downloads[id] = &item
+	d.downloadOrder = append([]string{id}, d.downloadOrder...)
+	d.downloadCancels[id] = cancelDownload
+	d.downloadMu.Unlock()
+	if err := d.persistDownloads(); err != nil {
+		d.downloadMu.Lock()
+		delete(d.downloads, id)
+		delete(d.downloadCancels, id)
+		d.downloadOrder = removeDownloadID(d.downloadOrder, id)
+		d.downloadMu.Unlock()
 		cancelDownload()
 		return DownloadItem{}, nil, fmt.Errorf("save download record: %w", err)
 	}
 	return item, downloadContext, nil
 }
 
-func (a *App) ListDownloads() []DownloadItem {
-	a.downloadMu.Lock()
-	defer a.downloadMu.Unlock()
-	items := make([]DownloadItem, 0, len(a.downloadOrder))
-	for _, id := range a.downloadOrder {
-		if item := a.downloads[id]; item != nil {
+func (d *DownloadService) ListDownloads() []DownloadItem {
+	d.downloadMu.Lock()
+	defer d.downloadMu.Unlock()
+	items := make([]DownloadItem, 0, len(d.downloadOrder))
+	for _, id := range d.downloadOrder {
+		if item := d.downloads[id]; item != nil {
 			items = append(items, *item)
 		}
 	}
 	return items
 }
 
-func (a *App) CancelDownload(id string) {
-	a.downloadMu.Lock()
-	cancel := a.downloadCancels[id]
-	a.downloadMu.Unlock()
+func (d *DownloadService) CancelDownload(id string) {
+	d.downloadMu.Lock()
+	cancel := d.downloadCancels[id]
+	d.downloadMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 }
 
-func (a *App) RemoveDownload(id string) error {
-	a.downloadMu.Lock()
-	item := a.downloads[id]
+func (d *DownloadService) RemoveDownload(id string) error {
+	d.downloadMu.Lock()
+	item := d.downloads[id]
 	if item == nil {
-		a.downloadMu.Unlock()
+		d.downloadMu.Unlock()
 		return nil
 	}
 	if item.Status == "queued" || item.Status == "downloading" {
-		a.downloadMu.Unlock()
+		d.downloadMu.Unlock()
 		return errors.New("cancel the active download before removing it")
 	}
-	delete(a.downloads, id)
-	delete(a.downloadCancels, id)
-	a.downloadOrder = removeDownloadID(a.downloadOrder, id)
-	a.downloadMu.Unlock()
-	return a.persistDownloads()
+	delete(d.downloads, id)
+	delete(d.downloadCancels, id)
+	d.downloadOrder = removeDownloadID(d.downloadOrder, id)
+	d.downloadMu.Unlock()
+	return d.persistDownloads()
 }
 
-func (a *App) RevealDownload(id string) error {
-	a.downloadMu.Lock()
-	item := a.downloads[id]
+func (d *DownloadService) RevealDownload(id string) error {
+	d.downloadMu.Lock()
+	item := d.downloads[id]
 	filePath := ""
 	if item != nil {
 		filePath = item.Path
 	}
-	a.downloadMu.Unlock()
+	d.downloadMu.Unlock()
 	if filePath == "" {
 		return errors.New("downloaded file is not available")
 	}
@@ -221,7 +246,7 @@ func (a *App) RevealDownload(id string) error {
 	return exec.Command("open", "-R", filePath).Start()
 }
 
-func (a *App) OpenDownloadsDirectory() error {
+func (d *DownloadService) OpenDownloadsDirectory() error {
 	directory, err := downloadsDirectory()
 	if err != nil {
 		return err
@@ -235,20 +260,20 @@ func (a *App) OpenDownloadsDirectory() error {
 	return exec.Command("open", directory).Start()
 }
 
-func CleanupDownloads(a *App) {
-	a.downloadMu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(a.downloadCancels))
-	for _, cancel := range a.downloadCancels {
+func (d *DownloadService) cleanup() {
+	d.downloadMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(d.downloadCancels))
+	for _, cancel := range d.downloadCancels {
 		cancels = append(cancels, cancel)
 	}
-	a.downloadMu.Unlock()
+	d.downloadMu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
 	}
 }
 
-func (a *App) runDownloadTask(ctx context.Context, item DownloadItem, task func(*http.Client, string) error) {
-	a.updateDownload(item.ID, func(current *DownloadItem) {
+func (d *DownloadService) runDownloadTask(ctx context.Context, item DownloadItem, task func(*http.Client, string) error) {
+	d.updateDownload(item.ID, func(current *DownloadItem) {
 		current.Status = "downloading"
 		current.Error = ""
 	})
@@ -263,8 +288,8 @@ func (a *App) runDownloadTask(ctx context.Context, item DownloadItem, task func(
 		client.CloseIdleConnections()
 	}
 
-	a.downloadMu.Lock()
-	current := a.downloads[item.ID]
+	d.downloadMu.Lock()
+	current := d.downloads[item.ID]
 	if current != nil {
 		switch {
 		case errors.Is(err, context.Canceled):
@@ -279,9 +304,9 @@ func (a *App) runDownloadTask(ctx context.Context, item DownloadItem, task func(
 			current.CompletedAt = time.Now().UnixMilli()
 		}
 	}
-	delete(a.downloadCancels, item.ID)
-	a.downloadMu.Unlock()
-	_ = a.persistDownloads()
+	delete(d.downloadCancels, item.ID)
+	d.downloadMu.Unlock()
+	_ = d.persistDownloads()
 }
 
 func resolveDownloadPage(ctx context.Context, client *http.Client, parsedURL *url.URL) (DownloadResolution, error) {
@@ -334,7 +359,7 @@ func resolveDownloadPage(ctx context.Context, client *http.Client, parsedURL *ur
 	return resolution, nil
 }
 
-func (a *App) downloadResolvedHLS(ctx context.Context, client *http.Client, id string, hlsURL string, directory string, referer string, preferredName string) error {
+func (d *DownloadService) downloadResolvedHLS(ctx context.Context, client *http.Client, id string, hlsURL string, directory string, referer string, preferredName string) error {
 	request, err := newDownloadRequest(ctx, hlsURL, referer)
 	if err != nil {
 		return err
@@ -347,10 +372,10 @@ func (a *App) downloadResolvedHLS(ctx context.Context, client *http.Client, id s
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("HLS server returned %s", response.Status)
 	}
-	return a.downloadHLS(ctx, client, id, response, directory, referer, preferredName)
+	return d.downloadHLS(ctx, client, id, response, directory, referer, preferredName)
 }
 
-func (a *App) downloadToDirectory(ctx context.Context, client *http.Client, id string, rawURL string, directory string) error {
+func (d *DownloadService) downloadToDirectory(ctx context.Context, client *http.Client, id string, rawURL string, directory string) error {
 	request, err := newDownloadRequest(ctx, rawURL, "")
 	if err != nil {
 		return err
@@ -366,7 +391,7 @@ func (a *App) downloadToDirectory(ctx context.Context, client *http.Client, id s
 
 	contentType := normalizedContentType(response.Header.Get("Content-Type"))
 	if isHLSResponse(response.Request.URL, contentType) {
-		return a.downloadHLS(ctx, client, id, response, directory, "", "")
+		return d.downloadHLS(ctx, client, id, response, directory, "", "")
 	}
 	limit := maxDownloadBytes
 	if contentType == "text/html" || strings.HasPrefix(contentType, "text/") {
@@ -387,29 +412,29 @@ func (a *App) downloadToDirectory(ctx context.Context, client *http.Client, id s
 		if len(candidates) == 1 {
 			preferredName := strings.TrimSuffix(downloadNameFromURL(response.Request.URL), filepath.Ext(downloadNameFromURL(response.Request.URL)))
 			referer := redactedDownloadURL(response.Request.URL)
-			if err := a.downloadEmbeddedHLS(ctx, client, id, candidates, directory, referer, preferredName); err != nil {
+			if err := d.downloadEmbeddedHLS(ctx, client, id, candidates, directory, referer, preferredName); err != nil {
 				return err
 			}
 			return nil
 		}
-		return a.saveDownloadBody(ctx, id, directory, response, contentType, bytes.NewReader(body), int64(len(body)))
+		return d.saveDownloadBody(ctx, id, directory, response, contentType, bytes.NewReader(body), int64(len(body)))
 	}
-	return a.saveDownloadBody(ctx, id, directory, response, contentType, response.Body, response.ContentLength)
+	return d.saveDownloadBody(ctx, id, directory, response, contentType, response.Body, response.ContentLength)
 }
 
-func (a *App) saveDownloadBody(ctx context.Context, id string, directory string, response *http.Response, contentType string, body io.Reader, contentLength int64) error {
+func (d *DownloadService) saveDownloadBody(ctx context.Context, id string, directory string, response *http.Response, contentType string, body io.Reader, contentLength int64) error {
 	limit := maxDownloadBytes
 	if contentType == "text/html" || strings.HasPrefix(contentType, "text/") {
 		limit = maxDownloadMetadataBytes
 	}
 	name := responseDownloadName(response, contentType)
-	a.updateDownload(id, func(item *DownloadItem) {
+	d.updateDownload(id, func(item *DownloadItem) {
 		item.Name = name
 		item.ContentType = contentType
 		item.TotalBytes = maxInt64(contentLength, 0)
 	})
 
-	tempPath, err := a.writeDownloadResponse(ctx, id, directory, body, limit)
+	tempPath, err := d.writeDownloadResponse(ctx, id, directory, body, limit)
 	if err != nil {
 		return err
 	}
@@ -418,14 +443,14 @@ func (a *App) saveDownloadBody(ctx context.Context, id string, directory string,
 		_ = os.Remove(tempPath)
 		return err
 	}
-	a.updateDownload(id, func(item *DownloadItem) {
+	d.updateDownload(id, func(item *DownloadItem) {
 		item.Path = finalPath
 		item.Name = filepath.Base(finalPath)
 	})
 	return nil
 }
 
-func (a *App) downloadEmbeddedHLS(ctx context.Context, client *http.Client, id string, candidates []string, directory string, referer string, preferredName string) error {
+func (d *DownloadService) downloadEmbeddedHLS(ctx context.Context, client *http.Client, id string, candidates []string, directory string, referer string, preferredName string) error {
 	var lastErr error
 	for _, candidate := range candidates {
 		request, err := newDownloadRequest(ctx, candidate, referer)
@@ -443,7 +468,7 @@ func (a *App) downloadEmbeddedHLS(ctx context.Context, client *http.Client, id s
 			response.Body.Close()
 			continue
 		}
-		err = a.downloadHLS(ctx, client, id, response, directory, referer, preferredName)
+		err = d.downloadHLS(ctx, client, id, response, directory, referer, preferredName)
 		response.Body.Close()
 		if err == nil {
 			return nil
@@ -456,7 +481,7 @@ func (a *App) downloadEmbeddedHLS(ctx context.Context, client *http.Client, id s
 	return fmt.Errorf("found embedded HLS URLs but could not download them: %w", lastErr)
 }
 
-func (a *App) downloadHLS(ctx context.Context, client *http.Client, id string, initialResponse *http.Response, directory string, referer string, preferredName string) error {
+func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, id string, initialResponse *http.Response, directory string, referer string, preferredName string) error {
 	body, err := readLimitedResponse(initialResponse.Body, maxDownloadMetadataBytes)
 	if err != nil {
 		return fmt.Errorf("read HLS playlist: %w", err)
@@ -506,7 +531,7 @@ func (a *App) downloadHLS(ctx context.Context, client *http.Client, id string, i
 	if extension == ".mp4" {
 		contentType = "video/mp4"
 	}
-	a.updateDownload(id, func(item *DownloadItem) {
+	d.updateDownload(id, func(item *DownloadItem) {
 		item.Name = name
 		item.ContentType = contentType
 		item.TotalBytes = 0
@@ -551,7 +576,7 @@ func (a *App) downloadHLS(ctx context.Context, client *http.Client, id string, i
 		}
 		written, copyErr := copyDownloadBody(ctx, tempFile, response.Body, maxDownloadBytes-total, func(delta int64) {
 			total += delta
-			a.setDownloadBytes(id, total)
+			d.setDownloadBytes(id, total)
 		})
 		response.Body.Close()
 		if copyErr != nil {
@@ -575,7 +600,7 @@ func (a *App) downloadHLS(ctx context.Context, client *http.Client, id string, i
 		return err
 	}
 	completed = true
-	a.updateDownload(id, func(item *DownloadItem) {
+	d.updateDownload(id, func(item *DownloadItem) {
 		item.Path = finalPath
 		item.Name = filepath.Base(finalPath)
 		item.TotalBytes = total
@@ -584,7 +609,7 @@ func (a *App) downloadHLS(ctx context.Context, client *http.Client, id string, i
 	return nil
 }
 
-func (a *App) writeDownloadResponse(ctx context.Context, id string, directory string, source io.Reader, limit int64) (string, error) {
+func (d *DownloadService) writeDownloadResponse(ctx context.Context, id string, directory string, source io.Reader, limit int64) (string, error) {
 	tempFile, err := os.CreateTemp(directory, ".fastfileviewer-download-*.part")
 	if err != nil {
 		return "", err
@@ -600,7 +625,7 @@ func (a *App) writeDownloadResponse(ctx context.Context, id string, directory st
 	var total int64
 	_, err = copyDownloadBody(ctx, tempFile, source, limit, func(delta int64) {
 		total += delta
-		a.setDownloadBytes(id, total)
+		d.setDownloadBytes(id, total)
 	})
 	if err != nil {
 		return "", err
@@ -654,16 +679,16 @@ func copyDownloadBody(ctx context.Context, destination io.Writer, source io.Read
 	}
 }
 
-func (a *App) updateDownload(id string, update func(*DownloadItem)) {
-	a.downloadMu.Lock()
-	if item := a.downloads[id]; item != nil {
+func (d *DownloadService) updateDownload(id string, update func(*DownloadItem)) {
+	d.downloadMu.Lock()
+	if item := d.downloads[id]; item != nil {
 		update(item)
 	}
-	a.downloadMu.Unlock()
+	d.downloadMu.Unlock()
 }
 
-func (a *App) setDownloadBytes(id string, bytes int64) {
-	a.updateDownload(id, func(item *DownloadItem) {
+func (d *DownloadService) setDownloadBytes(id string, bytes int64) {
+	d.updateDownload(id, func(item *DownloadItem) {
 		item.Bytes = bytes
 	})
 }
@@ -1190,10 +1215,10 @@ func downloadsHistoryPath() (string, error) {
 	return filepath.Join(configDirectory, "FastFileViewer", "downloads.json"), nil
 }
 
-func (a *App) persistDownloads() error {
-	a.downloadPersist.Lock()
-	defer a.downloadPersist.Unlock()
-	items := a.ListDownloads()
+func (d *DownloadService) persistDownloads() error {
+	d.downloadPersist.Lock()
+	defer d.downloadPersist.Unlock()
+	items := d.ListDownloads()
 	payload, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return err
@@ -1229,7 +1254,7 @@ func (a *App) persistDownloads() error {
 	return os.Rename(tempPath, historyPath)
 }
 
-func (a *App) loadDownloads() {
+func (d *DownloadService) loadDownloads() {
 	historyPath, err := downloadsHistoryPath()
 	if err != nil {
 		return
@@ -1246,10 +1271,10 @@ func (a *App) loadDownloads() {
 	if err := json.Unmarshal(payload, &items); err != nil {
 		return
 	}
-	a.downloadMu.Lock()
-	defer a.downloadMu.Unlock()
-	a.downloads = make(map[string]*DownloadItem, len(items))
-	a.downloadOrder = make([]string, 0, len(items))
+	d.downloadMu.Lock()
+	defer d.downloadMu.Unlock()
+	d.downloads = make(map[string]*DownloadItem, len(items))
+	d.downloadOrder = make([]string, 0, len(items))
 	for index := range items {
 		item := items[index]
 		if item.ID == "" || item.URL == "" {
@@ -1260,8 +1285,8 @@ func (a *App) loadDownloads() {
 			item.Error = "download was interrupted when the app closed"
 		}
 		copyItem := item
-		a.downloads[item.ID] = &copyItem
-		a.downloadOrder = append(a.downloadOrder, item.ID)
+		d.downloads[item.ID] = &copyItem
+		d.downloadOrder = append(d.downloadOrder, item.ID)
 	}
 }
 

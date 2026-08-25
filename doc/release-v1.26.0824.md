@@ -16,6 +16,7 @@ FastFileViewer is now a local-first file, media, archive, and download workspace
 - Expanded audio support to MP2/MP3, M4A/M4B/ALAC, WAV, AAC, FLAC, OGG/OPUS, AIFF, CAF, WMA, APE, WavPack, AC-3, AMR, and MKA.
 - Added native-first FLAC playback with automatic temporary M4A fallback when WebKit cannot decode the source.
 - Added eager `ffmpeg` compatibility conversion for WMA, APE, WavPack, standalone ALAC, AC-3, and AMR audio.
+- Added an optional post-remux cleanup flow that saves a playable MKV remux beside the source and moves the original to the Trash.
 
 ### Music Visualization
 

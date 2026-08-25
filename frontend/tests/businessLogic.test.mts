@@ -3,6 +3,13 @@ import test from 'node:test';
 import { parseDelimitedText, parseJsonDocument } from '../src/structuredData.ts';
 import { filterWorkspaceEntries } from '../src/workspaceFilters.ts';
 import { calculateLogSpectrumAmplitudes, convertSubtitleToWebVTT, findNextAudioEntry, findSidecarSubtitle, subtitleLanguageFromName } from '../src/mediaSupport.ts';
+import { buildImageDisplayLayout, calculateViewportScale, clampZoom } from '../src/imageLayout.ts';
+import { replaceLibraryEntry } from '../src/libraryTree.ts';
+import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize, shouldResolveDownloadPage } from '../src/downloads.ts';
+import { extractErrorMessage, isOperationCancelled } from '../src/operations.ts';
+import { readThumbnail, storeThumbnail } from '../src/thumbnailCache.ts';
+import { formatBytes } from '../src/format.ts';
+import type { ImageEntry, LibraryNode } from '../src/types.ts';
 
 test('parses quoted CSV cells and embedded newlines', () => {
   const parsed = parseDelimitedText('name,note\r\nAlice,"hello, world"\r\nBob,"line 1\nline 2"', ',');
@@ -94,4 +101,154 @@ test('advances to the next audio entry while skipping other file kinds', () => {
   assert.equal(findNextAudioEntry([...entries], 'song-1')?.id, 'song-2');
   assert.equal(findNextAudioEntry([...entries], 'song-2')?.id, 'song-1');
   assert.equal(findNextAudioEntry([entries[0]], 'song-1'), null);
+});
+
+test('uses rotated image bounds for zooming and panning', () => {
+  const naturalSize = { width: 1200, height: 800 };
+  const stageSize = { width: 600, height: 400 };
+  assert.equal(calculateViewportScale(naturalSize, stageSize, 'fitArea', 0), 0.5);
+  assert.equal(calculateViewportScale(naturalSize, stageSize, 'fitArea', 90), 1 / 3);
+
+  const layout = buildImageDisplayLayout('actual', 'lockRatio', naturalSize, stageSize, 2, 90);
+  assert.equal(layout.imageStyle.width, 2400);
+  assert.equal(layout.imageStyle.height, 1600);
+  assert.equal(layout.surfaceStyle.width, 1600);
+  assert.equal(layout.surfaceStyle.height, 2400);
+  assert.equal(layout.imageStyle.transform, 'translate(-50%, -50%) rotate(90deg)');
+});
+
+test('replaces a trashed original with the saved remux result', () => {
+  const buildEntry = (id: string, name: string, format: string): ImageEntry => ({
+    id,
+    name,
+    path: `/library/movies/${name}`,
+    directoryPath: '/library/movies',
+    source: 'file',
+    format,
+    kind: 'video',
+    size: 10,
+  });
+  const buildNode = (id: string, images: ImageEntry[], children: LibraryNode[] = []): LibraryNode => ({
+    id,
+    name: id,
+    path: `/library/${id}`,
+    kind: 'directory',
+    scanned: true,
+    images,
+    children,
+  });
+
+  const sibling = buildEntry('other', 'other.mp4', '.mp4');
+  const untouched = buildNode('archive', [buildEntry('kept', 'kept.mp4', '.mp4')]);
+  const tree = buildNode('root', [], [
+    untouched,
+    buildNode('movies', [sibling, buildEntry('original', 'movie.mkv', '.mkv')]),
+  ]);
+
+  const replacement = buildEntry('remuxed', 'movie.mp4', '.mp4');
+  const updated = replaceLibraryEntry(tree, 'original', replacement);
+
+  assert.deepEqual(updated.children[1].images.map((entry) => entry.id), ['other', 'remuxed']);
+  assert.equal(updated.children[1].images[1].name, 'movie.mp4');
+  assert.equal(updated.children[0], untouched);
+  assert.equal(tree.children[1].images[1].name, 'movie.mkv');
+});
+
+test('keeps the library tree untouched when the entry is missing', () => {
+  const tree: LibraryNode = {
+    id: 'root',
+    name: 'root',
+    path: '/library',
+    kind: 'directory',
+    scanned: true,
+    images: [],
+    children: [],
+  };
+  const replacement: ImageEntry = {
+    id: 'remuxed',
+    name: 'movie.mp4',
+    path: '/library/movie.mp4',
+    directoryPath: '/library',
+    source: 'file',
+    format: '.mp4',
+    kind: 'video',
+    size: 10,
+  };
+  assert.equal(replaceLibraryEntry(tree, 'missing', replacement), tree);
+});
+
+test('extracts and normalizes download URLs from pasted text', () => {
+  assert.deepEqual(
+    extractDownloadURLs('see https://example.com/a.mp4, and http://example.org/b.zip.'),
+    ['https://example.com/a.mp4', 'http://example.org/b.zip'],
+  );
+  assert.deepEqual(extractDownloadURLs('ftp://example.com/file no links here'), []);
+  assert.deepEqual(extractDownloadURLs('https://example.com'), ['https://example.com/']);
+});
+
+test('resolves only page-like URLs before downloading', () => {
+  for (const pageURL of ['https://example.com/videos/demo/', 'https://example.com/watch.html', 'https://example.com/play.php']) {
+    assert.equal(shouldResolveDownloadPage(pageURL), true, pageURL);
+  }
+  for (const fileURL of ['https://example.com/clip.mp4', 'https://example.com/stream.m3u8', 'https://example.com/pack.zip']) {
+    assert.equal(shouldResolveDownloadPage(fileURL), false, fileURL);
+  }
+  assert.equal(shouldResolveDownloadPage('not a url'), false);
+});
+
+test('formats download hosts, paths, and sizes for display', () => {
+  assert.equal(downloadHost('https://cdn.example.com/a/b.mp4'), 'cdn.example.com');
+  assert.equal(downloadHost('broken'), 'broken');
+  assert.equal(downloadCandidateDisplayURL('https://example.com/a%20b/c.m3u8'), 'example.com/a b/c.m3u8');
+  assert.equal(downloadCandidateDisplayURL('broken'), 'broken');
+  assert.equal(formatDownloadSize(512), '512 B');
+  assert.equal(formatDownloadSize(1536), '1.5 KB');
+  assert.equal(formatDownloadSize(5 * 1024 * 1024), '5.0 MB');
+  assert.equal(formatDownloadSize(3 * 1024 * 1024 * 1024), '3.00 GB');
+});
+
+test('clamps zoom to the toolbar range', () => {
+  assert.equal(clampZoom(0.05), 0.1);
+  assert.equal(clampZoom(12), 8);
+  assert.equal(clampZoom(1.5), 1.5);
+});
+
+test('reads backend operation errors and recognizes cancellation', () => {
+  assert.equal(extractErrorMessage(new Error('磁碟空間不足'), 'fallback'), '磁碟空間不足');
+  assert.equal(extractErrorMessage(new Error(''), 'fallback'), 'fallback');
+  assert.equal(extractErrorMessage('plain failure', 'fallback'), 'plain failure');
+  assert.equal(extractErrorMessage({ unexpected: true }, 'fallback'), 'fallback');
+
+  assert.equal(isOperationCancelled(new Error('操作已取消')), true);
+  assert.equal(isOperationCancelled('掃描目錄失敗: 操作已取消'), true);
+  assert.equal(isOperationCancelled(new Error('磁碟空間不足')), false);
+  assert.equal(isOperationCancelled(null), false);
+});
+
+test('evicts the least recently used thumbnail once the cache is full', () => {
+  const cacheLimit = 200;
+  for (let index = 0; index < cacheLimit; index += 1) {
+    storeThumbnail(`/lru/${index}.png`, `data:${index}`);
+  }
+  // 重新讀取最舊的一筆，讓它回到佇列尾端。
+  assert.equal(readThumbnail('/lru/0.png'), 'data:0');
+
+  storeThumbnail('/lru/overflow.png', 'data:overflow');
+  assert.equal(readThumbnail('/lru/overflow.png'), 'data:overflow');
+  assert.equal(readThumbnail('/lru/0.png'), 'data:0');
+  assert.equal(readThumbnail('/lru/1.png'), '', '最久沒被讀取的項目應該被淘汰');
+  assert.equal(readThumbnail('/lru/199.png'), 'data:199');
+});
+
+test('re-storing a thumbnail refreshes it instead of duplicating', () => {
+  storeThumbnail('/repeat.png', 'first');
+  storeThumbnail('/repeat.png', 'second');
+  assert.equal(readThumbnail('/repeat.png'), 'second');
+});
+
+test('formats file sizes for the workspace and status bar', () => {
+  assert.equal(formatBytes(0), '0 B');
+  assert.equal(formatBytes(1023), '1023 B');
+  assert.equal(formatBytes(2048), '2.0 KB');
+  assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
 });

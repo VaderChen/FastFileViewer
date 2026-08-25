@@ -316,13 +316,13 @@ func TestDownloadHistoryPersistence(t *testing.T) {
 	downloadUserConfigDir = func() (string, error) { return configDirectory, nil }
 	t.Cleanup(func() { downloadUserConfigDir = originalConfigDirectory })
 
-	application := New()
+	application := New().Download
 	application.downloads["saved"] = &DownloadItem{ID: "saved", URL: "https://example.com/file", Name: "file", Status: "downloading", CreatedAt: 1}
 	application.downloadOrder = []string{"saved"}
 	if err := application.persistDownloads(); err != nil {
 		t.Fatal(err)
 	}
-	reloaded := New()
+	reloaded := New().Download
 	reloaded.loadDownloads()
 	items := reloaded.ListDownloads()
 	if len(items) != 1 || items[0].Status != "failed" || !strings.Contains(items[0].Error, "interrupted") {
@@ -330,8 +330,8 @@ func TestDownloadHistoryPersistence(t *testing.T) {
 	}
 }
 
-func newDownloadTestApp(id string) *App {
-	application := New()
+func newDownloadTestApp(id string) *DownloadService {
+	application := New().Download
 	application.downloads[id] = &DownloadItem{ID: id, URL: "https://example.com", Name: "download", Status: "downloading"}
 	application.downloadOrder = []string{id}
 	return application
