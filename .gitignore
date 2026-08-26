@@ -29,6 +29,10 @@ package-dmg.sh
 /frontend/dist/
 /frontend/node_modules
 /third_party/ffmpeg/
+/build/darwin/FFmpeg.entitlements.plist
+/doc/en/update_log_1.26.0629.log
+/doc/jp/update_log_1.26.0629.log
+/doc/zh-TW/update_log_1.26.0629.log
 /THIRD-PARTY-LICENSES.txt
 /build-metadata.json
 *.app
