@@ -67,6 +67,21 @@ type ExportResult struct {
 	Skipped     int    `json:"skipped"`
 }
 
+type FileOperationFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+type TrashResult struct {
+	RemovedIDs []string               `json:"removedIds"`
+	Failed     []FileOperationFailure `json:"failed"`
+}
+
+type MoveResult struct {
+	Moved  []ImageEntry           `json:"moved"`
+	Failed []FileOperationFailure `json:"failed"`
+}
+
 type AppInfo struct {
 	HardwareInfo string `json:"hardwareInfo"`
 	OSVersion    string `json:"osVersion"`

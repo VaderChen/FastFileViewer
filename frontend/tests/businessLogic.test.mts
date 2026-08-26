@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseDelimitedText, parseJsonDocument } from '../src/structuredData.ts';
 import { filterWorkspaceEntries } from '../src/workspaceFilters.ts';
-import { calculateLogSpectrumAmplitudes, convertSubtitleToWebVTT, findNextAudioEntry, findSidecarSubtitle, subtitleLanguageFromName } from '../src/mediaSupport.ts';
+import { calculateLogSpectrumAmplitudes, convertSubtitleToWebVTT, findNextAudioEntry, findSidecarSubtitle, sidecarSRTPath, sidecarSubtitlePaths, subtitleLanguageFromName } from '../src/mediaSupport.ts';
 import { buildImageDisplayLayout, calculateViewportScale, clampZoom } from '../src/imageLayout.ts';
-import { replaceLibraryEntry } from '../src/libraryTree.ts';
+import { removeLibraryEntries, replaceLibraryEntry } from '../src/libraryTree.ts';
 import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize, shouldResolveDownloadPage } from '../src/downloads.ts';
 import { extractErrorMessage, isOperationCancelled } from '../src/operations.ts';
 import { readThumbnail, storeThumbnail } from '../src/thumbnailCache.ts';
@@ -48,6 +48,9 @@ test('matches a same-name sidecar subtitle', () => {
   assert.equal(subtitleLanguageFromName('movie.zh-TW.srt'), 'zh-TW');
   assert.equal(subtitleLanguageFromName('movie.cht.srt'), 'zh-TW');
   assert.equal(subtitleLanguageFromName('movie.chs.srt'), 'zh-CN');
+  assert.equal(sidecarSRTPath(video), '/movie.srt');
+  assert.deepEqual(sidecarSubtitlePaths(video), ['/movie.vtt', '/movie.srt']);
+  assert.equal(sidecarSRTPath({ ...video, path: '/archive.zip::folder/movie.mkv' }), '/archive.zip::folder/movie.srt');
 });
 
 test('converts common subtitle formats to WebVTT', () => {
@@ -251,4 +254,16 @@ test('formats file sizes for the workspace and status bar', () => {
   assert.equal(formatBytes(1023), '1023 B');
   assert.equal(formatBytes(2048), '2.0 KB');
   assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
+});
+
+test('removes library entries while preserving unaffected branch references', () => {
+  const kept = { id: 'keep', name: 'keep.png', path: '/keep.png', directoryPath: '/', source: 'file', format: '.png', kind: 'image', size: 1 } as ImageEntry;
+  const removed = { ...kept, id: 'remove', name: 'remove.png', path: '/remove.png' };
+  const untouched: LibraryNode = { id: 'untouched', name: 'untouched', path: '/untouched', kind: 'directory', scanned: true, images: [kept], children: [] };
+  const affected: LibraryNode = { id: 'affected', name: 'affected', path: '/affected', kind: 'directory', scanned: true, images: [removed], children: [] };
+  const root: LibraryNode = { id: 'root', name: 'root', path: '/', kind: 'directory', scanned: true, images: [], children: [untouched, affected] };
+  const result = removeLibraryEntries(root, new Set(['remove']));
+  assert.equal(result.children[0], untouched);
+  assert.notEqual(result.children[1], affected);
+  assert.deepEqual(result.children[1].images, []);
 });

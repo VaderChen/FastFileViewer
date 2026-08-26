@@ -35,6 +35,7 @@ func main() {
 			services.Library,
 			services.Media,
 			services.Download,
+			services.File,
 		},
 	})
 	if err != nil {

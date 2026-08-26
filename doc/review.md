@@ -12,7 +12,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 - Wails 2.13.0：將 Go 服務綁定到 macOS 桌面視窗及前端 WebView。
 - React 18、TypeScript、Vite 8：內容樹、Viewer、工作區、設定與下載介面。
 - `react-markdown`、`remark-gfm`、`highlight.js`、`rehype-highlight`：Markdown 與程式碼預覽。
-- 本機選用的 `ffmpeg`：MKV 與非原生音訊的相容播放，不隨公開 Repository 或 App Bundle 散布。
+- 發布 App 內建的 LGPL `ffmpeg`：MKV 與非原生音訊的相容播放；開發模式沒有 Bundle 時才回退使用本機工具。公開 Repository 不包含預建二進位檔。
 
 重要檔案：
 
@@ -177,7 +177,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 
 - HEIC 是否能顯示取決於 WebKit 與 macOS 的原生支援。
 - 壓縮檔歷史編碼可能仍無法完全還原檔名。
-- `ffmpeg` 非必要依賴；未安裝時，MKV 與非原生音訊可能無法播放。
+- 發布 App 已內建 LGPL `ffmpeg`；僅在開發模式沒有 Bundle 且未安裝本機工具時，MKV 與非原生音訊可能無法播放。
 - App 只對使用者主動選取的位置匯出；下載器則固定寫入 `~/Downloads/FastFileViewer`。
 
 修改後的最低檢查：

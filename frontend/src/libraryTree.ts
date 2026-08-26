@@ -17,3 +17,17 @@ export function replaceLibraryEntry(node: LibraryNode, replacedEntryId: string, 
     ];
   return { ...node, images, children };
 }
+
+// removeLibraryEntries 只複製實際受影響的分支，避免檔案操作後整棵樹失去參考相等性。
+export function removeLibraryEntries(node: LibraryNode, removedEntryIds: ReadonlySet<string>): LibraryNode {
+  if (removedEntryIds.size === 0) {
+    return node;
+  }
+  const images = node.images.filter((entry) => !removedEntryIds.has(entry.id));
+  const children = node.children.map((child) => removeLibraryEntries(child, removedEntryIds));
+  const childrenChanged = children.some((child, index) => child !== node.children[index]);
+  if (images.length === node.images.length && !childrenChanged) {
+    return node;
+  }
+  return { ...node, images, children };
+}

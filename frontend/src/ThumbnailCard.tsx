@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxArchive, faCheck, faFileLines, faFolder, faImage, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import type { ImageEntry } from './types';
@@ -11,7 +12,7 @@ interface ThumbnailCardProps {
   selected: boolean;
   archiveLabel: string;
   folderLabel: string;
-  onToggle: () => void;
+  onToggle: (event: MouseEvent<HTMLButtonElement>) => void;
   onOpen: () => void;
 }
 
