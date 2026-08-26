@@ -13,7 +13,7 @@
 
 ## 不公開
 
-- 所有本機發布資產、憑證與個人化說明。
+- 所有本機發布資產與個人化說明。
 - App Store、TestFlight、PKG、商店審查流程與所有本機發布設定。
 - `build/bin/`、`dist/`、`frontend/dist/`、`frontend/node_modules/` 與所有安裝包。
 - `.env*`、本機資料、個人文件、快取、除錯紀錄及未遮蔽路徑。
@@ -23,7 +23,7 @@
 
 - GPLv3＋商業授權維持雙軌條款。
 - Contributor License Agreement 完成前，不合併外部程式碼 Pull Request。
-- 每次發布前重新掃描 Token、本機發布憑證、個人路徑與大型二進位檔。
+- 每次發布前重新掃描 Token、個人路徑與大型二進位檔。
 - `LICENSE`、`THIRD-PARTY-NOTICES.md` 與建置產物內完整授權文字保持同步。
 - Repository 名稱與 module path 使用 `FastFileViewer`／`github.com/VaderChen/FastFileViewer`。
 - 公開建置預設 Bundle ID 為 `com.vader.fastfileviewer`，不啟用 App Sandbox。

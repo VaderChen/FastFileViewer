@@ -146,7 +146,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 - Bundle ID：`com.vader.fastfileviewer`
 - 最低 macOS：12.0
 - 架構：Apple Silicon arm64
-- 公開 `build.sh`：不啟用 App Sandbox，使用 ad-hoc 或指定的本機簽章身份
+- 公開 `build.sh`：不啟用 App Sandbox
 - App 產物：`dist/FastFileViewer.app`
 
 開發模式：
@@ -163,16 +163,6 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 
 建置會檢查 Go、前端相依套件、production build、測試與 audit，並將 GPLv3、第三方授權全文、通知及 `build-metadata.json` 放入 App Bundle 的 `Contents/Resources`。
 
-正式 DMG 流程：
-
-```bash
-./package-dmg.sh
-```
-
-此流程要求已追蹤工作樹乾淨、HEAD 具有 `v1.2.3` 格式的精確 tag、Developer ID Application 簽章身份，並預設要求 Apple Notary Service 與 stapling。`SKIP_NOTARIZATION=1` 僅適合本機驗證，不可作為公開發布產物。
-
-`package-appstore.sh` 是獨立的 App Store／TestFlight 打包流程，不由公開 `build.sh` 呼叫；使用前必須核對腳本中的 App 名稱、Bundle ID、Team ID、憑證與 provisioning profile，避免把非公開發布設定帶入 Repository。
-
 ## 已知限制與檢查項目
 
 - HEIC 是否能顯示取決於 WebKit 與 macOS 的原生支援。
@@ -188,4 +178,4 @@ go test ./...
 cd frontend && npm run build
 ```
 
-若修改建置或發布流程，再依序檢查 `./build.sh`、App Bundle 授權檔、`build-metadata.json`、簽章、notarization 與 SHA-256 校驗檔。
+若修改建置流程，再依序檢查 `./build.sh`、App Bundle 授權檔與 `build-metadata.json`。

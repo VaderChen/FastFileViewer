@@ -41,7 +41,7 @@
 
 ## 開源版
 
-公開原始碼版本不使用 StoreKit、不啟用 App Sandbox，也不包含本機發布憑證或個人化設定。應用程式可存取目前登入帳號原本就有權限的檔案與目錄；macOS 對桌面、文件、下載項目或外接磁碟等隱私保護位置仍可能要求授權。
+公開原始碼版本不使用 StoreKit、不啟用 App Sandbox，也不包含個人化設定。應用程式可存取目前登入帳號原本就有權限的檔案與目錄；macOS 對桌面、文件、下載項目或外接磁碟等隱私保護位置仍可能要求授權。
 
 ## 開發需求
 
@@ -90,8 +90,6 @@ dist/FastFileViewer.app
 - `build-metadata.json`
 
 預先建置版本可由 [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) 取得。
-
-DMG 發布工具與簽署憑證設定不包含在 Repository；請在私有發布環境中執行發布流程。
 
 ## 資料與隱私
 
