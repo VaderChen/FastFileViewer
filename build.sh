@@ -28,7 +28,6 @@ APP_BUNDLE_VERSION="${APP_BUNDLE_VERSION:-$APP_MARKETING_VERSION.$APP_BUILD_LABE
 
 if (( $# > 0 )); then
   echo "用法：$0"
-  echo "未指定本機簽章設定時使用 ad-hoc 簽章，且不啟用 App Sandbox。"
   exit 1
 fi
 

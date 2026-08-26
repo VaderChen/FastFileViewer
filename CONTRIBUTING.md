@@ -20,4 +20,4 @@
 
 ## 敏感資料
 
-請勿在 Issue、討論、附件或提交中提供 Apple 憑證、Provisioning Profile、私鑰、Token、個人文件、未遮蔽路徑或其他敏感資料。
+請勿在 Issue、討論、附件或提交中提供私密資料、Token、個人文件或未遮蔽路徑。
