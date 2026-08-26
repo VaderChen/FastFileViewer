@@ -22,7 +22,7 @@
 - スペクトラムは 32768-point floating-decibel FFT の対数中心周波数を補間し、sample rate が許す場合は 18 Hz–24 kHz を表示します。
 - MP2／MP3、M4A／M4B／ALAC、WAV、AAC、FLAC、OGG／OPUS、AIFF、CAF、WMA、APE、WavPack、AC-3、AMR、MKA に対応します。
 - FLAC は WebKit のネイティブ再生を優先し、失敗した場合は一時的な互換 M4A に自動変換します。
-- ローカルに `ffmpeg` がある場合、MKV を一時 MP4 に自動リマックスまたはトランスコードして再生します。
+- リリース版には LGPL FFmpeg を内蔵し、MKV を一時 MP4 に自動リマックスまたはトランスコードして再生します。開発モードでは Bundle がない場合にローカルの `ffmpeg` を使用します。
 - MKV のリマックス後は、再生可能なファイルを元のフォルダに保存し、元ファイルをゴミ箱へ移動するか選択できます。次回から変換は不要です。
 - 同じフォルダにある VTT、SRT、ASS、SSA、SMI、テキスト形式 SUB 字幕を自動的に関連付けます。
 - 「ダウンロード」に公開 HTTP/HTTPS URL を貼り付けるかドロップして、画像、動画、記事、一般ファイルを取得できます。直接アクセス可能な動画ページでは HTML とインラインスクリプトから `.m3u8` を解析します。
@@ -40,7 +40,7 @@
 
 ## 開発とビルド
 
-必要環境は Apple Silicon Mac、macOS 12 以降、Go 1.26.4、Node.js、npm、Xcode Command Line Tools、`rsync` です。MKV と非ネイティブ音声の互換再生には `ffmpeg` が必要です（`brew install ffmpeg`）。
+必要環境は Apple Silicon Mac、macOS 12 以降、Go 1.26.4、Node.js、npm、Xcode Command Line Tools、`rsync`、`pkg-config`、libopus、libvpx です。内蔵 LGPL FFmpeg のビルドには `brew install pkg-config opus libvpx` を使用できます。
 
 ```bash
 git clone https://github.com/VaderChen/FastFileViewer.git
@@ -49,14 +49,15 @@ cd FastFileViewer
 ```
 
 ```bash
+./scripts/build-ffmpeg-macos.sh
 ./build.sh
 ```
 
 出力は `dist/FastFileViewer.app` です。ビルド時に GPLv3、第三者ライセンス全文、通知、Git のビルドメタデータを App Bundle の `Contents/Resources` に含めます。
 
-ビルド済みファイルと SHA-256 チェックサムは [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) から取得できます。
+ビルド済みファイルは [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) から取得できます。
 
-Developer ID 署名と Apple 公証を行う DMG は `package-dmg.command` の実行またはダブルクリックで作成できます。引数がない場合は既存の `dist/FastFileViewer.app` を使用します。正式なタグ付き再ビルドには `./package-dmg.command --build` を使用し、クリーンな worktree と正確な tag が必要です。DMG 作成に App Store provisioning profile は不要で、利用可能な `VaderApp` notarytool Keychain Profile を自動検出します。
+DMG の公開ツールと署名資格情報は本 Repository に含めず、非公開のリリース環境で実行してください。
 
 ## プライバシーとセキュリティ
 
