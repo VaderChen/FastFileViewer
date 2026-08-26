@@ -9,8 +9,6 @@
 - Added an optional post-remux cleanup flow for MKV playback: save the playable remux beside the source and move the original to the Trash, or keep the original and use the temporary playback cache.
 - Corrected the developer documentation to describe the 32768-point audio FFT, current service boundaries, and current FastFileViewer packaging model.
 - Moved the default App Bundle output to `dist/FastFileViewer.app` and aligned the DMG/App Store packaging scripts and App Store Bundle ID with the current product name.
-- Aligned Developer ID DMG signing with MangaKitchen: automatic `VaderApp` notary-profile discovery, optional existing-App signing with `--skip-build`, and distinct build-labelled DMG names for non-tagged builds.
-- Made a no-argument `package-dmg.command` invocation use the existing `dist` App by default; formal clean tagged rebuilds now require the explicit `--build` option.
 
 ## 1.26.0824
 
