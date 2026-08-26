@@ -10,7 +10,11 @@
 .env
 .env.*
 /cert/*
-!/cert/README.md
+/cert/
+package-appstore.command
+package-appstore.sh
+package-dmg.command
+package-dmg.sh
 /data/
 *.p12
 *.key
@@ -24,6 +28,7 @@
 /dist/
 /frontend/dist/
 /frontend/node_modules
+/third_party/ffmpeg/
 /THIRD-PARTY-LICENSES.txt
 /build-metadata.json
 *.app

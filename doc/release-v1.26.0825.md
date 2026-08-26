@@ -17,7 +17,6 @@ FastFileViewer 1.26.0825 improves media preparation, separates long-running serv
 ### Build and Distribution
 
 - Moved the default App output to `dist/FastFileViewer.app`.
-- Added Developer ID DMG signing with automatic notary-profile discovery, App and DMG notarization, ticket stapling, Gatekeeper verification, and SHA-256 output.
 - Added an existing-App packaging mode for local build-labelled DMGs while keeping clean tagged rebuilds as the formal release path.
 - Updated Traditional Chinese, English, and Japanese documentation for the current features and packaging workflow.
 
@@ -30,12 +29,3 @@ FastFileViewer 1.26.0825 improves media preparation, separates long-running serv
 ## Downloads
 
 - `FastFileViewer-1.26.0825-arm64.dmg`
-- `FastFileViewer-1.26.0825-arm64.dmg.sha256`
-
-
-## Source and License
-
-- Source: https://github.com/VaderChen/FastFileViewer/tree/v1.26.0825
-- License: GNU GPL v3, with a separate commercial license available
-- Security policy: https://github.com/VaderChen/FastFileViewer/blob/v1.26.0825/SECURITY.md
-- Third-party notices: https://github.com/VaderChen/FastFileViewer/blob/v1.26.0825/THIRD-PARTY-NOTICES.md

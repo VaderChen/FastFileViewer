@@ -19,5 +19,5 @@ This release adds local video and audio playback with subtitle support, along wi
 ## Downloads
 
 - `FastFileViewer-1.26.0820-arm64.dmg`
-- `FastFileViewer-1.26.0820-arm64.dmg.sha256`
 
+For the complete list of changes, see the [CHANGELOG](https://github.com/VaderChen/FastFileViewer/blob/v1.26.0820/CHANGELOG.md).

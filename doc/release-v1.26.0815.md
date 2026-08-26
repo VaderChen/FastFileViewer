@@ -19,7 +19,6 @@ This is the first open-source release of FastFileViewer, an offline macOS worksp
 ## Download
 
 - `FastFileViewer-1.26.0815-arm64.dmg`
-- `FastFileViewer-1.26.0815-arm64.dmg.sha256`
 
 ## Privacy and License
 
