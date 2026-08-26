@@ -1,4 +1,4 @@
-import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DownloadItem, DownloadResolution, DuplicateGroup, ExportResult, ImageEntry, ImagePayload } from './types';
+import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DownloadItem, DownloadResolution, DuplicateGroup, ExportResult, ImageEntry, ImagePayload, MoveResult, TrashResult } from './types';
 
 declare global {
   interface Window {
@@ -24,6 +24,7 @@ declare global {
           LoadThumbnailByPath: (filePath: string, maxDimension: number) => Promise<ImagePayload>;
           ExportImages: (images: ImageEntry[], dialogTitle: string, operationId: number) => Promise<ExportResult>;
           DetectDuplicates: (images: ImageEntry[], operationId: number) => Promise<DuplicateGroup[]>;
+          PrepareDocumentByPath: (filePath: string, operationId: number) => Promise<string>;
         };
         // MediaService 負責播放前的解壓、改封裝與播放快取。
         MediaService?: {
@@ -37,6 +38,14 @@ declare global {
             confirmLabel: string,
             cancelLabel: string,
           ) => Promise<ImageEntry>;
+          PrepareDocumentByPath: (filePath: string, operationId: number) => Promise<string>;
+        };
+        FileService?: {
+          RenameEntry: (filePath: string, newName: string) => Promise<ImageEntry>;
+          TrashEntries: (filePaths: string[]) => Promise<TrashResult>;
+          ConfirmTrashEntries: (filePaths: string[], title: string, message: string, confirmLabel: string, cancelLabel: string) => Promise<TrashResult>;
+          MoveEntries: (filePaths: string[], destination: string) => Promise<MoveResult>;
+          SelectMoveDestination: (dialogTitle: string) => Promise<string>;
         };
         // DownloadService 負責下載佇列與歷史紀錄。
         DownloadService?: {

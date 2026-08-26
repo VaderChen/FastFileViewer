@@ -97,6 +97,25 @@ export function findSidecarSubtitle(media: ImageEntry, entries: ImageEntry[]): I
     })[0] ?? null;
 }
 
+// sidecarSRTPath 由影片實際路徑推導同目錄、同檔名的 SRT；也適用 archive::inner/path 格式。
+export function sidecarSRTPath(media: ImageEntry): string | null {
+  return sidecarSubtitlePaths(media).find((path) => path.toLowerCase().endsWith('.srt')) ?? null;
+}
+
+// sidecarSubtitlePaths 回傳播放時可直接嘗試的同名字幕，優先使用 WebVTT。
+export function sidecarSubtitlePaths(media: ImageEntry): string[] {
+  if (media.kind !== 'video' || !media.path) {
+    return [];
+  }
+  const extensionIndex = media.path.lastIndexOf('.');
+  const separatorIndex = Math.max(media.path.lastIndexOf('/'), media.path.lastIndexOf('\\'));
+  if (extensionIndex <= separatorIndex) {
+    return [];
+  }
+  const stem = media.path.slice(0, extensionIndex);
+  return [`${stem}.vtt`, `${stem}.srt`];
+}
+
 export function convertSubtitleToWebVTT(text: string, format: string): string | null {
   const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
   if (!normalized) {

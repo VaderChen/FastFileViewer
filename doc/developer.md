@@ -40,7 +40,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - Markdown：`react-markdown`、`remark-gfm`
 - 語法上色：`highlight.js`、`rehype-highlight`
 - 圖示：Font Awesome
-- 媒體相容工具：使用者選用安裝的 `ffmpeg`，用於 MKV 與非原生音訊；不隨 Repository 或 App Bundle 散布
+- 媒體相容工具：發布 App 內建 LGPL `ffmpeg`，用於 MKV 與非原生音訊；開發模式沒有 Bundle 時回退使用本機安裝版本，Repository 不包含預建二進位檔
 
 ## 主要目錄
 

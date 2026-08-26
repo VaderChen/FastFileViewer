@@ -76,6 +76,7 @@ var supportedImageExtensions = []string{
 }
 
 var supportedDocumentExtensions = []string{
+	".pdf",
 	".txt",
 	".md",
 	".markdown",
@@ -188,6 +189,7 @@ type Services struct {
 	Library  *App
 	Media    *MediaService
 	Download *DownloadService
+	File     *FileService
 }
 
 // New 會建立互相串接好的服務集合。
@@ -199,6 +201,7 @@ func New() *Services {
 		Library:  &App{entries: entries, operations: operations, media: media},
 		Media:    media,
 		Download: newDownloadService(),
+		File:     newFileService(entries),
 	}
 }
 
@@ -207,6 +210,7 @@ func (s *Services) Startup(ctx context.Context) {
 	s.Library.Startup(ctx)
 	s.Media.Startup(ctx)
 	s.Download.Startup(ctx)
+	s.File.Startup(ctx)
 }
 
 // Shutdown 會釋放各服務持有的暫存資源。
@@ -414,7 +418,7 @@ func (a *App) LoadDocumentByPath(filePath string) (DocumentPayload, error) {
 	if err != nil {
 		return DocumentPayload{}, err
 	}
-	if entry.Kind == "image" || entry.Kind == "video" || entry.Kind == "audio" {
+	if entry.Kind == "image" || entry.Kind == "video" || entry.Kind == "audio" || entry.Kind == "pdf" {
 		return DocumentPayload{}, fmt.Errorf("不是支援的文字文件: %s", entry.Name)
 	}
 
@@ -437,6 +441,12 @@ func (a *App) LoadDocumentByPath(filePath string) (DocumentPayload, error) {
 		Source:   entry.Source,
 		Location: location,
 	}, nil
+}
+
+// PrepareDocumentByPath 會註冊已驗證的 PDF 項目，並回傳本機串流網址。
+// 壓縮檔內的 PDF 會先解壓到媒體暫存目錄，關閉應用程式時由既有清理流程移除。
+func (a *App) PrepareDocumentByPath(filePath string, operationID int64) (string, error) {
+	return a.media.PrepareDocumentByPath(filePath, operationID)
 }
 
 func (a *App) ExportImages(images []ImageEntry, dialogTitle string, operationID int64) (ExportResult, error) {
@@ -1425,6 +1435,9 @@ func splitArchiveEntryPath(imagePath string) (string, string, bool) {
 }
 
 func entryKind(extension string) string {
+	if extension == ".pdf" {
+		return "pdf"
+	}
 	if extension == ".md" || extension == ".markdown" {
 		return "markdown"
 	}

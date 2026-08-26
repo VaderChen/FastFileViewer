@@ -5,6 +5,7 @@ import {
   audioSpectrumMinimumDecibels,
   calculateLogSpectrumAmplitudes,
   convertSubtitleToWebVTT,
+  sidecarSubtitlePaths,
   subtitleLanguageFromName,
 } from './mediaSupport';
 
@@ -38,6 +39,7 @@ interface MediaPlayerProps {
   labels: MediaPlayerLabels;
   visible?: boolean;
   pausePlayback?: boolean;
+  fullscreen?: boolean;
   onAudioEnded?: () => boolean;
   onOriginalReplaced?: (replacement: ImageEntry, replacedEntryId: string) => void;
 }
@@ -61,7 +63,7 @@ type AudioVisualizationMode = 'spectrum' | 'waveform' | 'both';
 const audioGraphs = new WeakMap<HTMLAudioElement, AudioGraph>();
 const audioVisualizationStorageKey = 'fastfileviewer.audioVisualizationMode';
 
-export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlayback = false, onAudioEnded, onOriginalReplaced }: MediaPlayerProps) {
+export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlayback = false, fullscreen = false, onAudioEnded, onOriginalReplaced }: MediaPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -75,8 +77,10 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   labelsRef.current = labels;
   const resumeAudioAfterSourceChangeRef = useRef(false);
   const videoFrameRef = useRef<HTMLDivElement>(null);
+  const controlsHideTimerRef = useRef<number | null>(null);
   const [mediaURL, setMediaURL] = useState('');
   const [subtitleURL, setSubtitleURL] = useState('');
+  const [subtitleTrackName, setSubtitleTrackName] = useState('');
   const [error, setError] = useState('');
   const [subtitleError, setSubtitleError] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -86,6 +90,34 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   const [muted, setMuted] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [audioVisualizationMode, setAudioVisualizationMode] = useState<AudioVisualizationMode>(resolveInitialAudioVisualizationMode);
+
+  const clearControlsHideTimer = () => {
+    if (controlsHideTimerRef.current !== null) {
+      window.clearTimeout(controlsHideTimerRef.current);
+      controlsHideTimerRef.current = null;
+    }
+  };
+
+  const [controlsVisible, setControlsVisible] = useState(true);
+
+  useEffect(() => {
+    clearControlsHideTimer();
+    // 一般視窗固定顯示；進入全螢幕後等待滑鼠活動才顯示控制列。
+    setControlsVisible(!fullscreen);
+    return clearControlsHideTimer;
+  }, [entry.id, fullscreen]);
+
+  const revealControls = () => {
+    if (!fullscreen) {
+      return;
+    }
+    setControlsVisible(true);
+    clearControlsHideTimer();
+    controlsHideTimerRef.current = window.setTimeout(() => {
+      controlsHideTimerRef.current = null;
+      setControlsVisible(false);
+    }, 5000);
+  };
 
   useEffect(() => {
     localStorage.setItem(audioVisualizationStorageKey, audioVisualizationMode);
@@ -281,35 +313,41 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     let cancelled = false;
     let objectURL = '';
     setSubtitleURL('');
+    setSubtitleTrackName('');
     setSubtitleError('');
-    if (entry.kind !== 'video' || !subtitle) {
+    if (entry.kind !== 'video') {
       return () => undefined;
     }
-    void window.go?.app?.App?.LoadDocumentByPath?.(subtitle.path)
-      .then((payload) => {
-        if (cancelled || !payload) {
+    const subtitlePaths = subtitle ? [subtitle.path] : sidecarSubtitlePaths(entry);
+    if (subtitlePaths.length === 0) {
+      return () => undefined;
+    }
+    void (async () => {
+      for (const subtitlePath of subtitlePaths) {
+        if (cancelled) return;
+        try {
+          const payload = await window.go?.app?.App?.LoadDocumentByPath?.(subtitlePath);
+          if (!payload) continue;
+          const webVTT = convertSubtitleToWebVTT(payload.text, payload.format);
+          if (!webVTT) continue;
+          objectURL = URL.createObjectURL(new Blob([webVTT], { type: 'text/vtt;charset=utf-8' }));
+          setSubtitleTrackName(payload.name || subtitle?.name || subtitlePath.split(/[\\/]/).pop() || 'subtitle.vtt');
+          setSubtitleURL(objectURL);
           return;
+        } catch {
+          // 自動推導的字幕不存在時繼續嘗試下一個格式。
         }
-        const webVTT = convertSubtitleToWebVTT(payload.text, payload.format);
-        if (!webVTT) {
-          setSubtitleError(labels.subtitleFailed);
-          return;
-        }
-        objectURL = URL.createObjectURL(new Blob([webVTT], { type: 'text/vtt;charset=utf-8' }));
-        setSubtitleURL(objectURL);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSubtitleError(labels.subtitleFailed);
-        }
-      });
+      }
+      // 自動推導的同名字幕不存在是正常情況；只有已掃描到的字幕載入失敗才顯示錯誤。
+      if (!cancelled && subtitle) setSubtitleError(labels.subtitleFailed);
+    })();
     return () => {
       cancelled = true;
       if (objectURL) {
         URL.revokeObjectURL(objectURL);
       }
     };
-  }, [entry.kind, labels.subtitleFailed, subtitle]);
+  }, [entry.kind, entry.path, labels.subtitleFailed, subtitle]);
 
   useEffect(() => {
     const textTrack = videoRef.current?.textTracks[0];
@@ -373,7 +411,11 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   return (
     <div className={`media-player ${entry.kind}`}>
       {entry.kind === 'video' && mediaURL ? (
-        <div ref={videoFrameRef} className="video-player-frame">
+        <div
+          ref={videoFrameRef}
+          className={`video-player-frame ${fullscreen && !controlsVisible ? 'controls-hidden' : ''}`}
+          onPointerMove={revealControls}
+        >
           <video
             ref={videoRef}
             key={mediaURL}
@@ -405,13 +447,13 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
             onError={() => setError(labels.playbackFailed)}
           >
             <source src={mediaURL} />
-            {subtitle && subtitleURL ? (
+            {subtitleURL ? (
               <track
                 key={subtitleURL}
                 kind="subtitles"
                 src={subtitleURL}
-                srcLang={subtitleLanguageFromName(subtitle.name)}
-                label={subtitle.name}
+                srcLang={subtitleLanguageFromName(subtitleTrackName)}
+                label={subtitleTrackName}
                 default
                 onLoad={(event) => {
                   event.currentTarget.track.mode = subtitlesEnabled ? 'showing' : 'disabled';
@@ -462,7 +504,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
                 }
               }}
             />
-            {subtitle && subtitleURL ? (
+            {subtitleURL ? (
               <button
                 className={subtitlesEnabled ? 'active' : ''}
                 type="button"
@@ -689,8 +731,9 @@ function drawAudioVisualization(
 
   if (mode !== 'waveform') {
     const barCount = 72;
-    const gap = Math.max(2 * pixelRatio, width * 0.0025);
-    const barWidth = Math.max(1, (width - gap * (barCount - 1)) / barCount);
+    // 使用整數像素邊界，避免浮點數 fillRect 造成個別柱受到不同程度的抗鋸齒。
+    const gap = Math.max(1, Math.round(Math.max(2 * pixelRatio, width * 0.0025)));
+    const barWidth = Math.max(1, Math.floor((width - gap * (barCount - 1)) / barCount));
     const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, analyser.context.sampleRate, analyser.fftSize, barCount, idle);
     const barGradient = context.createLinearGradient(0, height, 0, 0);
     barGradient.addColorStop(0, 'rgba(63, 191, 139, 0.9)');

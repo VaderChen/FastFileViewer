@@ -6,7 +6,7 @@
 
 - Go、React、TypeScript 與 Wails 原始碼。
 - 圖片、文件、程式碼、壓縮檔瀏覽、內容工作區、安全 URL 下載、影片頁 `.m3u8` 解析／複選及公開未加密 HLS VOD 合併功能。
-- 選用本機 `ffmpeg` 的 MKV 暫存 MP4 與非原生音訊暫存 M4A 相容播放整合；Repository 不包含或散布 `ffmpeg` 二進位檔。
+- 發布 App 會將依 `scripts/build-ffmpeg-macos.sh` 建立的 LGPL FFmpeg/ffprobe 動態版本放入 App Bundle；開發模式若沒有 Bundle 才回退使用系統 FFmpeg。Repository 不包含預建 FFmpeg 二進位檔。
 - macOS Apple Silicon 開發與可重現 App 建置腳本。
 - App icon、GPLv3、商業授權說明、安全政策及開發文件。
 - 第三方相依套件清冊產生工具。

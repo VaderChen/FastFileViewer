@@ -18,6 +18,7 @@ import {
   faArrowsRotate,
   faArrowsToEye,
   faBoxArchive,
+  faCheck,
   faClone,
   faCompress,
   faCircleCheck,
@@ -46,7 +47,7 @@ import { isMediaKind, isPlaybackMediaKind } from './types';
 import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
-import { replaceLibraryEntry } from './libraryTree';
+import { removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
 import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize } from './downloads';
 import { useDownloads } from './useDownloads';
 import { useImageViewer } from './useImageViewer';
@@ -61,7 +62,7 @@ import { findNextAudioEntry, findSidecarSubtitle } from './mediaSupport';
 const fallbackBootstrap: BootstrapPayload = {
   defaultPath: '',
   supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic'],
-  supportedDocuments: ['.txt', '.md', '.markdown'],
+  supportedDocuments: ['.pdf', '.txt', '.md', '.markdown'],
   supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.mp2', '.m4a', '.m4b', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.aif', '.aiff', '.aifc', '.caf', '.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
   supportedPacks: ['.zip', '.tar', '.tgz', '.tar.gz'],
 };
@@ -84,6 +85,7 @@ const messages = {
     mediaCount: '個媒體',
     contentCount: '個項目',
     loadingDocument: '讀取文件中',
+    pdfPreview: 'PDF 預覽',
     markdownPreview: 'Markdown 預覽',
     textPreview: '純文字預覽',
     subtitlePreview: '字幕預覽',
@@ -145,6 +147,15 @@ const messages = {
     noImage: '未選擇內容',
     selectPathFirst: '請先選擇或輸入圖片目錄',
     operationFailed: '操作失敗',
+    cancel: '取消',
+    trashSelected: '刪除',
+    renameEntry: '重新命名',
+    moveSelected: '移動選取項目',
+    chooseMoveDestination: '選擇移動目的地',
+    trashConfirm: '確定要刪除選取項目嗎？',
+    trashDialogTitle: '刪除',
+    trashConfirmButton: '刪除',
+    movedSummary: '移動完成',
     cancelOperation: '取消作業',
     previewTruncated: '檔案過大，僅顯示前段內容',
     remoteContentBlocked: '已封鎖遠端內容',
@@ -249,6 +260,7 @@ const messages = {
     mediaCount: 'media',
     contentCount: 'items',
     loadingDocument: 'Loading document',
+    pdfPreview: 'PDF preview',
     markdownPreview: 'Markdown preview',
     textPreview: 'Plain text preview',
     subtitlePreview: 'Subtitle preview',
@@ -310,6 +322,15 @@ const messages = {
     noImage: 'No content selected',
     selectPathFirst: 'Choose or enter a folder first',
     operationFailed: 'Operation failed',
+    cancel: 'Cancel',
+    trashSelected: 'Delete',
+    renameEntry: 'Rename',
+    moveSelected: 'Move selected items',
+    chooseMoveDestination: 'Choose move destination',
+    trashConfirm: 'Delete the selected items?',
+    trashDialogTitle: 'Delete',
+    trashConfirmButton: 'Delete',
+    movedSummary: 'Move complete',
     cancelOperation: 'Cancel operation',
     previewTruncated: 'Large file: showing only the beginning',
     remoteContentBlocked: 'Remote content blocked',
@@ -414,6 +435,7 @@ const messages = {
     mediaCount: '件のメディア',
     contentCount: '項目',
     loadingDocument: '文書を読み込み中',
+    pdfPreview: 'PDF プレビュー',
     markdownPreview: 'Markdown プレビュー',
     textPreview: 'テキストプレビュー',
     subtitlePreview: '字幕プレビュー',
@@ -475,6 +497,15 @@ const messages = {
     noImage: 'コンテンツ未選択',
     selectPathFirst: '先にフォルダを選択または入力してください',
     operationFailed: '操作に失敗しました',
+    cancel: 'キャンセル',
+    trashSelected: '削除',
+    renameEntry: '名前を変更',
+    moveSelected: '選択項目を移動',
+    chooseMoveDestination: '移動先を選択',
+    trashConfirm: '選択した項目を削除しますか？',
+    trashDialogTitle: '削除',
+    trashConfirmButton: '削除',
+    movedSummary: '移動完了',
     cancelOperation: '処理をキャンセル',
     previewTruncated: '大きなファイルの先頭部分のみ表示しています',
     remoteContentBlocked: 'リモートコンテンツをブロックしました',
@@ -683,8 +714,11 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [selectedImageId, setSelectedImageId] = useState('');
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
+  const [selectionAnchorId, setSelectionAnchorId] = useState('');
   const [imagePayload, setImagePayload] = useState<ImagePayload | null>(null);
   const [documentPayload, setDocumentPayload] = useState<DocumentPayload | null>(null);
+  const [pdfURL, setPdfURL] = useState<string | null>(null);
   const [documentViewMode, setDocumentViewMode] = useState<'preview' | 'raw'>('preview');
   const [retainedAudioEntry, setRetainedAudioEntry] = useState<ImageEntry | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -711,6 +745,7 @@ export default function App() {
   const [checksumBusy, setChecksumBusy] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('display');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo>(fallbackAppInfo);
   const scanTokenRef = useRef(0);
   const scanOperationRef = useRef<number | null>(null);
@@ -946,6 +981,9 @@ export default function App() {
     cancelLoadMore: cancelWorkspaceLoadMore,
     exportSelected: handleExportSelected,
     detectDuplicates: handleDetectDuplicates,
+    trashSelected: handleTrashSelected,
+    moveSelected: handleMoveSelected,
+    trashDuplicateGroup: handleTrashDuplicateGroup,
     cancelOperation: handleCancelWorkspaceOperation,
   } = useWorkspace({
     libraryImages: allLibraryImages,
@@ -954,6 +992,37 @@ export default function App() {
       exportedSummary: t.exportedSummary,
       noDuplicates: t.noDuplicates,
       operationFailed: t.operationFailed,
+      trashSelected: t.trashSelected,
+      moveSelected: t.moveSelected,
+      chooseMoveDestination: t.chooseMoveDestination,
+      trashConfirm: t.trashConfirm,
+      trashDialogTitle: t.trashDialogTitle,
+      trashConfirmButton: t.trashConfirmButton,
+      cancel: t.cancel,
+      movedSummary: t.movedSummary,
+    },
+    onEntriesRemoved: (ids) => {
+      const removed = new Set(ids);
+      setTree((current) => current ? removeLibraryEntries(current, removed) : current);
+      if (removed.has(selectedImageId)) setSelectedImageId('');
+      setSelectedImageIds((current) => {
+        const next = new Set(current);
+        removed.forEach((id) => next.delete(id));
+        return next;
+      });
+      setSelectionAnchorId((current) => removed.has(current) ? '' : current);
+    },
+    onEntryMoved: (oldId, replacement) => {
+      setTree((current) => current ? replaceLibraryEntry(current, oldId, replacement) : current);
+      if (selectedImageId === oldId) setSelectedImageId(replacement.id);
+      setSelectedImageIds((current) => {
+        if (!current.has(oldId)) return current;
+        const next = new Set(current);
+        next.delete(oldId);
+        next.add(replacement.id);
+        return next;
+      });
+      setSelectionAnchorId((current) => current === oldId ? replacement.id : current);
     },
   });
 
@@ -983,13 +1052,21 @@ export default function App() {
   useEffect(() => {
     if (visibleImages.length === 0) {
       setSelectedImageId('');
+      setSelectedImageIds(new Set());
+      setSelectionAnchorId('');
       setImagePayload(null);
       setDocumentPayload(null);
+      setPdfURL(null);
       return;
     }
     if (!visibleImages.some((image) => image.id === selectedImageId)) {
       setSelectedImageId(visibleImages[0].id);
     }
+    setSelectedImageIds((current) => {
+      const visibleIDs = new Set(visibleImages.map((image) => image.id));
+      const next = new Set([...current].filter((id) => visibleIDs.has(id)));
+      return next.size > 0 ? next : new Set([visibleImages[0].id]);
+    });
   }, [selectedImageId, visibleImages]);
 
   useEffect(() => {
@@ -1020,6 +1097,7 @@ export default function App() {
     if (selectedImageEntry && isPlaybackMediaKind(selectedImageEntry.kind)) {
       setImagePayload(null);
       setDocumentPayload(null);
+      setPdfURL(null);
       setErrorMessage('');
       setLoadingImage(false);
       return () => {
@@ -1029,6 +1107,34 @@ export default function App() {
 
     if (selectedImageEntry && selectedImageEntry.kind !== 'image') {
       setImagePayload(null);
+      setPdfURL(null);
+      if (selectedImageEntry.kind === 'pdf') {
+        void (async () => {
+          let operationId = 0;
+          try {
+            operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+            const prepare = window.go?.app?.MediaService?.PrepareDocumentByPath ?? window.go?.app?.App?.PrepareDocumentByPath;
+            const url = await prepare?.(selectedImageEntry.path, operationId);
+            if (!cancelled && url) {
+              setPdfURL(url);
+            }
+          } catch (error) {
+            if (!cancelled) {
+              setErrorMessage(extractErrorMessage(error, t.operationFailed));
+            }
+          } finally {
+            if (operationId !== 0) {
+              void window.go?.app?.App?.FinishOperation?.(operationId);
+            }
+            if (!cancelled) {
+              setLoadingImage(false);
+            }
+          }
+        })();
+        return () => {
+          cancelled = true;
+        };
+      }
       void window.go?.app?.App?.LoadDocumentByPath?.(selectedImageEntry.path)
         .then((payload) => {
           if (!cancelled && payload) {
@@ -1052,6 +1158,7 @@ export default function App() {
     }
 
     setDocumentPayload(null);
+    setPdfURL(null);
 
     const cachedPayload = selectedImageEntry ? getCachedImagePayload(selectedImageEntry) : null;
     if (cachedPayload) {
@@ -1232,7 +1339,10 @@ export default function App() {
     const cachedImageId = selection?.selectedImageId || cache.selectedImageId;
     setTree(cache.tree);
     setSelectedNodeId(findNode(cache.tree, cachedNodeId)?.id ?? cache.tree.id);
-    setSelectedImageId(findImage(cache.tree, cachedImageId)?.id ?? collectImages(cache.tree)[0]?.id ?? '');
+    const restoredImageId = findImage(cache.tree, cachedImageId)?.id ?? collectImages(cache.tree)[0]?.id ?? '';
+    setSelectedImageId(restoredImageId);
+    setSelectedImageIds(restoredImageId ? new Set([restoredImageId]) : new Set());
+    setSelectionAnchorId(restoredImageId);
     setExpandedNodeIds(new Set(cache.expandedNodeIds.length > 0 ? cache.expandedNodeIds : [cache.tree.id]));
     setScannedDirectories(cache.scannedDirectories);
   };
@@ -1483,12 +1593,64 @@ export default function App() {
   };
 
   const openImageContextMenu = (event: MouseEvent<HTMLElement>, node: LibraryNode, image: ImageEntry) => {
+    const imageWasSelected = selectedImageIds.has(image.id);
+    const selectedTargets = imageWasSelected
+      ? allLibraryImages.filter((item) => selectedImageIds.has(item.id))
+      : [image];
+    if (!imageWasSelected) {
+      setSelectedImageIds(new Set([image.id]));
+      setSelectionAnchorId(image.id);
+      setSelectedNodeId(node.id);
+      setSelectedImageId(image.id);
+    }
+    const renameImage = async () => {
+      const nextName = window.prompt(t.renameEntry, image.name);
+      if (!nextName || nextName === image.name) return;
+      try {
+        const replacement = await window.go?.app?.FileService?.RenameEntry?.(image.path, nextName);
+        if (replacement) {
+          setTree((current) => current ? replaceLibraryEntry(current, image.id, replacement) : current);
+          if (selectedImageId === image.id) setSelectedImageId(replacement.id);
+          setSelectedImageIds((current) => {
+            if (!current.has(image.id)) return current;
+            const next = new Set(current);
+            next.delete(image.id);
+            next.add(replacement.id);
+            return next;
+          });
+          setSelectionAnchorId((current) => current === image.id ? replacement.id : current);
+        }
+      } catch (error) {
+        window.alert(extractErrorMessage(error, t.operationFailed));
+      }
+    };
+    const trashImage = async () => {
+      try {
+        const result = await window.go?.app?.FileService?.ConfirmTrashEntries?.(
+          selectedTargets.map((target) => target.path), t.trashDialogTitle, t.trashConfirm, t.trashConfirmButton, t.cancel,
+        );
+        if (result?.removedIds?.length) {
+          const removed = new Set(result.removedIds);
+          setTree((current) => current ? removeLibraryEntries(current, removed) : current);
+          if (removed.has(selectedImageId)) setSelectedImageId('');
+          setSelectedImageIds((current) => {
+            const next = new Set(current);
+            removed.forEach((id) => next.delete(id));
+            return next;
+          });
+        }
+      } catch (error) {
+        window.alert(extractErrorMessage(error, t.operationFailed));
+      }
+    };
     openContextMenu(event, [
       {
         label: t.selectItem,
         action: () => {
           setSelectedNodeId(node.id);
           setSelectedImageId(image.id);
+          setSelectedImageIds(new Set([image.id]));
+          setSelectionAnchorId(image.id);
         },
       },
       {
@@ -1502,6 +1664,14 @@ export default function App() {
       {
         label: t.copyImageLocation,
         action: () => copyText(image.path),
+      },
+      {
+        label: t.renameEntry,
+        action: () => void renameImage(),
+      },
+      {
+        label: t.trashSelected,
+        action: () => void trashImage(),
       },
     ]);
   };
@@ -1563,6 +1733,11 @@ export default function App() {
         setWorkspaceOpen(false);
         return;
       }
+      if (event.key === 'Escape' && selectionActionsOpen) {
+        event.preventDefault();
+        setSelectionActionsOpen(false);
+        return;
+      }
       const target = event.target as HTMLElement | null;
       if (target?.closest('button, input, textarea, select, [contenteditable="true"]')) {
         return;
@@ -1583,7 +1758,20 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu, fullscreen, navigationImages, selectedImageId, settingsOpen, visibleImages, workspaceOpen]);
+  }, [contextMenu, fullscreen, navigationImages, selectedImageId, selectionActionsOpen, settingsOpen, visibleImages, workspaceOpen]);
+
+  useEffect(() => {
+    if (!selectionActionsOpen) {
+      return;
+    }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest('.selection-actions-menu')) {
+        setSelectionActionsOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [selectionActionsOpen]);
 
   const handleWheelNavigation = (event: React.WheelEvent<HTMLElement>) => {
     if (!activeIsImage || visibleImages.length === 0) {
@@ -1700,8 +1888,44 @@ export default function App() {
     setSelectedNodeId(node.id);
     const firstImage = firstImageInTreeOrder(node);
     setSelectedImageId(firstImage?.id ?? '');
+    setSelectedImageIds(firstImage ? new Set([firstImage.id]) : new Set());
+    setSelectionAnchorId(firstImage?.id ?? '');
     if (!firstImage) {
       setImagePayload(null);
+    }
+  };
+
+  const selectTreeImage = (node: LibraryNode, image: ImageEntry, event: MouseEvent<HTMLButtonElement>) => {
+    const toggleSelection = event.metaKey || event.ctrlKey;
+    const imageOrder = navigationImages.map((item) => item.image);
+    let nextSelection: Set<string>;
+
+    if (event.shiftKey && selectionAnchorId) {
+      const anchorIndex = imageOrder.findIndex((item) => item.id === selectionAnchorId);
+      const targetIndex = imageOrder.findIndex((item) => item.id === image.id);
+      if (anchorIndex >= 0 && targetIndex >= 0) {
+        const start = Math.min(anchorIndex, targetIndex);
+        const end = Math.max(anchorIndex, targetIndex);
+        nextSelection = new Set(imageOrder.slice(start, end + 1).map((item) => item.id));
+      } else {
+        nextSelection = new Set([image.id]);
+      }
+    } else if (toggleSelection) {
+      nextSelection = new Set(selectedImageIds);
+      if (nextSelection.has(image.id)) {
+        nextSelection.delete(image.id);
+      } else {
+        nextSelection.add(image.id);
+      }
+    } else {
+      nextSelection = new Set([image.id]);
+    }
+
+    setSelectedNodeId(node.id);
+    setSelectedImageId(image.id);
+    setSelectedImageIds(nextSelection);
+    if (!event.shiftKey) {
+      setSelectionAnchorId(image.id);
     }
   };
 
@@ -1806,9 +2030,6 @@ export default function App() {
             <button className="icon-button" type="button" title={t.settings} onClick={() => setSettingsOpen(true)}>
               <FontAwesomeIcon icon={faGear} />
             </button>
-            <button className="icon-button" type="button" title={t.chooseDirectory} onClick={handleChooseDirectory}>
-              <FontAwesomeIcon icon={faFolderOpen} />
-            </button>
             <button className="icon-button" type="button" title={t.collapse} onClick={() => setLibraryCollapsed(true)}>
               <FontAwesomeIcon icon={faAngleLeft} />
             </button>
@@ -1827,17 +2048,22 @@ export default function App() {
         </nav>
 
         <div className="path-row">
-          <input
-            value={rootPath}
-            onChange={(event) => setRootPath(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                void handleScan();
-              }
-            }}
-            placeholder={t.pathPlaceholder}
-            spellCheck={false}
-          />
+          <div className="path-input-wrap">
+            <input
+              value={rootPath}
+              onChange={(event) => setRootPath(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  void handleScan();
+                }
+              }}
+              placeholder={t.pathPlaceholder}
+              spellCheck={false}
+            />
+            <button className="icon-button path-directory-button" type="button" title={t.chooseDirectory} onClick={handleChooseDirectory}>
+              <FontAwesomeIcon icon={faFolderOpen} />
+            </button>
+          </div>
           {scanning ? (
             <button className="icon-button" type="button" title={t.stopScan} onClick={handleStopScan}>
               <FontAwesomeIcon icon={faStop} />
@@ -2014,14 +2240,12 @@ export default function App() {
               depth={0}
               selectedNodeId={selectedNode?.id ?? ''}
               selectedImageId={selectedImageId}
+              selectedImageIds={selectedImageIds}
               expandedNodeIds={expandedNodeIds}
               labels={{ expand: t.expand, collapse: t.collapse, pin: t.pinDirectory, unpin: t.unpinDirectory }}
               pinnedDirectories={pinnedDirectorySet}
               onSelect={selectTreeNode}
-              onSelectImage={(node, image) => {
-                setSelectedNodeId(node.id);
-                setSelectedImageId(image.id);
-              }}
+              onSelectImage={selectTreeImage}
               onToggle={toggleExpanded}
               onTogglePinned={togglePinnedDirectory}
               onOpenNodeContextMenu={openNodeContextMenu}
@@ -2111,7 +2335,7 @@ export default function App() {
 
         <section
           ref={imageStageRef}
-          className={`image-stage stage-bg-${stageBackground} ${viewerMode} ${fullscreen ? 'view-fullscreen' : ''} ${imagePayload ? 'has-image' : ''} ${documentPayload ? 'has-document' : ''} ${activeIsMedia ? 'has-media' : ''} ${panning ? 'panning' : ''}`}
+          className={`image-stage stage-bg-${stageBackground} ${viewerMode} ${fullscreen ? 'view-fullscreen' : ''} ${imagePayload ? 'has-image' : ''} ${documentPayload || pdfURL ? 'has-document' : ''} ${activeIsMedia ? 'has-media' : ''} ${panning ? 'panning' : ''}`}
           onDoubleClick={handleStageDoubleClick}
           onPointerDown={activeIsImage ? handlePanStart : undefined}
           onPointerMove={activeIsImage ? handlePanMove : undefined}
@@ -2128,6 +2352,7 @@ export default function App() {
                 labels={mediaPlayerLabels}
                 visible={persistentAudioVisible}
                 pausePlayback={activeImage?.kind === 'video'}
+                fullscreen={fullscreen}
                 onAudioEnded={() => moveToNextAudio(persistentAudioEntry.id)}
               />
             </div>
@@ -2137,6 +2362,15 @@ export default function App() {
               <FontAwesomeIcon icon={faSpinner} spin />
               <span>{t.loadingImage}</span>
             </div>
+          ) : pdfURL ? (
+            <article className="pdf-viewer">
+              <header>
+                <FontAwesomeIcon icon={faFileLines} />
+                <strong>{t.pdfPreview}</strong>
+                <span>{activeImage?.name}</span>
+              </header>
+              <embed src={pdfURL} type="application/pdf" title={activeImage?.name ?? t.pdfPreview} />
+            </article>
           ) : documentPayload ? (
             <article className={`document-viewer document-theme-${documentTheme} ${activeImage?.kind === 'text' || activeIsSubtitle ? 'plain-text' : activeImage?.kind === 'markdown' ? 'markdown' : 'code'}`}>
               <header>
@@ -2204,6 +2438,7 @@ export default function App() {
               entry={activeImage}
               subtitle={activeSubtitle}
               labels={mediaPlayerLabels}
+              fullscreen={fullscreen}
               onOriginalReplaced={handleOriginalReplaced}
             />
           ) : activeAudioEntry ? null : imagePayload ? (
@@ -2302,17 +2537,41 @@ export default function App() {
                   >
                     {t.selectFiltered}
                   </button>
-                  <button className="workspace-action" type="button" onClick={clearWorkspaceSelection} disabled={selectedWorkspaceImages.length === 0}>
-                    {t.clearSelection}
-                  </button>
-                  <button className="workspace-action primary" type="button" onClick={() => void handleExportSelected()} disabled={workspaceBusy || selectedWorkspaceImages.length === 0}>
-                    <FontAwesomeIcon icon={faFileExport} />
-                    {t.exportSelected}
-                  </button>
                   <button className="workspace-action" type="button" onClick={() => void handleDetectDuplicates()} disabled={workspaceBusy || filteredWorkspaceImages.length === 0}>
                     <FontAwesomeIcon icon={workspaceBusy ? faSpinner : faClone} spin={workspaceBusy} />
                     {t.detectDuplicates}
                   </button>
+                  <div className="selection-actions-menu">
+                    <button
+                      className={`workspace-action selection-actions-trigger ${selectionActionsOpen ? 'active' : ''}`}
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={selectionActionsOpen}
+                      onClick={() => setSelectionActionsOpen((current) => !current)}
+                      disabled={selectedWorkspaceImages.length === 0}
+                    >
+                      <FontAwesomeIcon icon={faCheck} />
+                      {t.selectedCount} ({selectedWorkspaceImages.length.toLocaleString()})
+                    </button>
+                    {selectionActionsOpen ? (
+                      <div className="selection-actions-popover" role="menu">
+                        <button className="workspace-action" type="button" role="menuitem" onClick={() => { setSelectionActionsOpen(false); clearWorkspaceSelection(); }}>
+                          {t.clearSelection}
+                        </button>
+                        <button className="workspace-action" type="button" role="menuitem" onClick={() => { setSelectionActionsOpen(false); void handleTrashSelected(); }} disabled={workspaceBusy}>
+                          <FontAwesomeIcon icon={faTrashCan} />
+                          {t.trashSelected}
+                        </button>
+                        <button className="workspace-action" type="button" role="menuitem" onClick={() => { setSelectionActionsOpen(false); void handleMoveSelected(); }} disabled={workspaceBusy}>
+                          {t.moveSelected}
+                        </button>
+                        <button className="workspace-action primary" type="button" role="menuitem" onClick={() => { setSelectionActionsOpen(false); void handleExportSelected(); }} disabled={workspaceBusy}>
+                          <FontAwesomeIcon icon={faFileExport} />
+                          {t.exportSelected}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   {workspaceBusy ? (
                     <button className="workspace-action" type="button" onClick={handleCancelWorkspaceOperation}>
                       <FontAwesomeIcon icon={faStop} />
@@ -2335,7 +2594,7 @@ export default function App() {
                         selected={selectedWorkspaceImageIds.has(image.id)}
                         archiveLabel={t.sourceArchive}
                         folderLabel={t.sourceFolder}
-                        onToggle={() => toggleWorkspaceImage(image.id)}
+                        onToggle={(event) => toggleWorkspaceImage(image.id, { toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })}
                         onOpen={() => {
                           const imageRef = navigationImages.find((item) => item.image.id === image.id);
                           if (imageRef) {
@@ -2410,6 +2669,12 @@ export default function App() {
                         <span>{image.name}</span>
                       </button>
                     ))}
+                    {group.images.length > 1 ? (
+                      <button className="workspace-action" type="button" onClick={() => void handleTrashDuplicateGroup(group, group.images[0].id)} disabled={workspaceBusy}>
+                        <FontAwesomeIcon icon={faTrashCan} />
+                        {t.trashSelected}（{group.images[0].name}）
+                      </button>
+                    ) : null}
                   </div>
                 ))}
               </aside> : null}
@@ -2684,6 +2949,7 @@ interface TreeNodeProps {
   depth: number;
   selectedNodeId: string;
   selectedImageId: string;
+  selectedImageIds: Set<string>;
   expandedNodeIds: Set<string>;
   labels: {
     expand: string;
@@ -2693,7 +2959,7 @@ interface TreeNodeProps {
   };
   pinnedDirectories: Set<string>;
   onSelect: (node: LibraryNode) => void;
-  onSelectImage: (node: LibraryNode, image: ImageEntry) => void;
+  onSelectImage: (node: LibraryNode, image: ImageEntry, event: MouseEvent<HTMLButtonElement>) => void;
   onToggle: (nodeId: string) => void;
   onTogglePinned: (directoryPath: string) => void;
   onOpenNodeContextMenu: (event: MouseEvent<HTMLElement>, node: LibraryNode) => void;
@@ -2764,6 +3030,7 @@ function TreeNode({
   depth,
   selectedNodeId,
   selectedImageId,
+  selectedImageIds,
   expandedNodeIds,
   labels,
   pinnedDirectories,
@@ -2778,7 +3045,7 @@ function TreeNode({
   const hasExpandableItems = node.children.length > 0 || node.images.length > 0;
   const icon = node.kind === 'archive' ? faBoxArchive : expanded && hasExpandableItems ? faFolderOpen : faFolder;
   const imageCount = countImages(node);
-  const selectedInCollapsedTree = !expanded && containsImage(node, selectedImageId);
+  const selectedInCollapsedTree = !expanded && (containsImage(node, selectedImageId) || [...selectedImageIds].some((id) => containsImage(node, id)));
   const selectedClass = selectedNodeId === node.id || selectedInCollapsedTree ? 'selected' : '';
   const pinned = node.kind === 'directory' && pinnedDirectories.has(normalizePinnedDirectory(node.path));
 
@@ -2832,6 +3099,7 @@ function TreeNode({
                 depth={depth + 1}
                 selectedNodeId={selectedNodeId}
                 selectedImageId={selectedImageId}
+                selectedImageIds={selectedImageIds}
                 expandedNodeIds={expandedNodeIds}
                 labels={labels}
                 pinnedDirectories={pinnedDirectories}
@@ -2846,14 +3114,14 @@ function TreeNode({
             {node.images.map((image) => (
               <div
                 key={image.id}
-                className={`tree-row image-row ${image.id === selectedImageId ? 'selected-image' : ''}`}
+                    className={`tree-row image-row ${selectedImageIds.has(image.id) ? 'selected-image' : ''}`}
                 style={{ paddingLeft: 10 + (depth + 1) * 18 }}
               >
                 <span className="expander" />
                 <button
                   className="tree-label image-label"
                   type="button"
-                  onClick={() => onSelectImage(node, image)}
+                  onClick={(event) => onSelectImage(node, image, event)}
                   onContextMenu={(event) => onOpenImageContextMenu(event, node, image)}
                   title={image.path}
                 >

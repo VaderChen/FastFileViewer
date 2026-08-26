@@ -1,6 +1,6 @@
 export type NodeKind = 'directory' | 'archive';
 export type ImageSource = 'file' | 'archive';
-export type EntryKind = 'image' | 'text' | 'markdown' | 'code' | 'video' | 'audio' | 'subtitle';
+export type EntryKind = 'image' | 'text' | 'markdown' | 'code' | 'pdf' | 'video' | 'audio' | 'subtitle';
 export type MediaEntryKind = 'video' | 'audio' | 'subtitle';
 export type ViewerMode = 'fit' | 'actual';
 export type ZoomBehavior = 'fitArea' | 'shrinkLarge' | 'lockRatio';
@@ -69,6 +69,21 @@ export interface DuplicateGroup {
   hash: string;
   totalBytes: number;
   images: ImageEntry[];
+}
+
+export interface FileOperationFailure {
+  path: string;
+  error: string;
+}
+
+export interface TrashResult {
+  removedIds: string[];
+  failed: FileOperationFailure[];
+}
+
+export interface MoveResult {
+  moved: ImageEntry[];
+  failed: FileOperationFailure[];
 }
 
 export interface ExportResult {

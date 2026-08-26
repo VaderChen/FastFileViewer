@@ -5,6 +5,10 @@ The complete, deduplicated license and notice texts are provided in `THIRD-PARTY
 
 Covered build targets: `darwin/arm64`.
 
+## Optional bundled FFmpeg
+
+Release builds bundle an LGPL shared-library build of FFmpeg 8.1.2 made by `scripts/build-ffmpeg-macos.sh`. It enables VideoToolbox, AudioToolbox, libopus, and libvpx, and does not enable GPL, nonfree, libx264, libx265, or libxvid components. Source is available from `https://ffmpeg.org/releases/`; the complete configure command is recorded in the build script.
+
 ## Go Dependencies
 
 | Package | Version | Declared license | Documents | Targets |

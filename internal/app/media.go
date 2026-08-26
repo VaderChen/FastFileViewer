@@ -19,6 +19,7 @@ import (
 )
 
 const mediaURLPrefix = "/media/"
+const documentURLPrefix = "/document/"
 
 var (
 	findFFmpegExecutable  = findFFmpeg
@@ -32,6 +33,10 @@ func NewMediaMiddleware(service *MediaService) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 			if strings.HasPrefix(request.URL.Path, mediaURLPrefix) {
 				service.serveMedia(response, request)
+				return
+			}
+			if strings.HasPrefix(request.URL.Path, documentURLPrefix) {
+				service.serveDocument(response, request)
 				return
 			}
 			next.ServeHTTP(response, request)
@@ -95,6 +100,38 @@ func (s *MediaService) PrepareMediaByPath(filePath string, operationID int64) (s
 	}
 	s.entries.remember(entry)
 	return mediaURLPrefix + url.PathEscape(entry.ID), nil
+}
+
+// PrepareDocumentByPath 會註冊已驗證的 PDF 項目，並回傳本機串流網址。
+// 壓縮檔內的 PDF 會先解壓到媒體暫存目錄，關閉應用程式時由既有清理流程移除。
+func (s *MediaService) PrepareDocumentByPath(filePath string, operationID int64) (string, error) {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return "", errors.New("文件路徑不可空白")
+	}
+	entry, err := entryByPath(filePath)
+	if err != nil {
+		return "", err
+	}
+	if entry.Kind != "pdf" {
+		return "", fmt.Errorf("不是支援的 PDF 文件: %s", entry.Name)
+	}
+	if entry.Source == "archive" {
+		if _, err := s.seekableMediaPath(s.operations.context(operationID), entry); err != nil {
+			return "", err
+		}
+	} else {
+		info, err := os.Stat(entry.Path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", fmt.Errorf("讀取 PDF 失敗: %w", err)
+		}
+		if info.Size() > maxExportBytes {
+			return "", fmt.Errorf("%s 超過預覽上限 %d GB", entry.Name, maxExportBytes/(1024*1024*1024))
+		}
+		entry.Size = info.Size()
+	}
+	s.entries.remember(entry)
+	return documentURLPrefix + url.PathEscape(entry.ID), nil
 }
 
 // PrepareCompatibleMediaByPath 會在 WebKit 無法解碼原始音訊時建立通用 M4A 暫存檔。
@@ -234,68 +271,6 @@ func (s *MediaService) isInsideMediaCache(candidatePath string) bool {
 		return false
 	}
 	return relativePath != ".." && !strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
-}
-
-// duplicateFile 會優先建立硬連結，跨磁碟區時才實際複製內容。
-func duplicateFile(sourcePath string, targetPath string) error {
-	if err := os.Link(sourcePath, targetPath); err == nil {
-		return nil
-	}
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-	target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(target, source); err != nil {
-		_ = target.Close()
-		_ = os.Remove(targetPath)
-		return err
-	}
-	if err := target.Close(); err != nil {
-		_ = os.Remove(targetPath)
-		return err
-	}
-	return nil
-}
-
-// moveToTrash 會把檔案搬到使用者的垃圾桶，讓誤刪仍可救回。
-func moveToTrash(filePath string) error {
-	if runtime.GOOS != "darwin" {
-		return errors.New("此平台不支援垃圾桶")
-	}
-	homeDirectory, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	trashDirectory := filepath.Join(homeDirectory, ".Trash")
-	if err := os.MkdirAll(trashDirectory, 0o700); err != nil {
-		return err
-	}
-	targetPath := availableTrashPath(trashDirectory, filepath.Base(filePath))
-	if err := os.Rename(filePath, targetPath); err == nil {
-		return nil
-	}
-	if err := duplicateFile(filePath, targetPath); err != nil {
-		return err
-	}
-	return os.Remove(filePath)
-}
-
-func availableTrashPath(trashDirectory string, name string) string {
-	extension := filepath.Ext(name)
-	stem := strings.TrimSuffix(name, extension)
-	candidate := filepath.Join(trashDirectory, name)
-	for index := 1; index < 1000; index++ {
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			return candidate
-		}
-		candidate = filepath.Join(trashDirectory, fmt.Sprintf("%s %d%s", stem, index, extension))
-	}
-	return candidate
 }
 
 func (s *MediaService) serveMedia(response http.ResponseWriter, request *http.Request) {
@@ -759,6 +734,9 @@ func displayFormat(extension string) string {
 }
 
 func findFFprobe() (string, error) {
+	if candidate, err := bundledFFmpegTool("ffprobe"); err == nil {
+		return candidate, nil
+	}
 	if ffmpegPath, err := findFFmpegExecutable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(ffmpegPath), "ffprobe")
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
@@ -772,6 +750,9 @@ func findFFprobe() (string, error) {
 }
 
 func findFFmpeg() (string, error) {
+	if candidate, err := bundledFFmpegTool("ffmpeg"); err == nil {
+		return candidate, nil
+	}
 	for _, candidate := range []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"} {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 			return candidate, nil
@@ -781,6 +762,24 @@ func findFFmpeg() (string, error) {
 		return candidate, nil
 	}
 	return "", errors.New("找不到 ffmpeg")
+}
+
+// bundledFFmpegTool 只在正式 App Bundle 內尋找工具；開發模式找不到時交給系統路徑處理。
+func bundledFFmpegTool(name string) (string, error) {
+	if runtime.GOOS != "darwin" {
+		return "", errors.New("目前平台沒有內建 FFmpeg")
+	}
+	executablePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	appContents := filepath.Dir(filepath.Dir(executablePath))
+	candidate := filepath.Join(appContents, "Resources", "bin", name)
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		return "", errors.New("找不到 App Bundle 內的 FFmpeg 工具")
+	}
+	return candidate, nil
 }
 
 func (s *MediaService) cleanup() {
