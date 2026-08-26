@@ -27,7 +27,7 @@
 - 柱狀頻譜採 32768 點浮點 dB FFT 與對數中心頻率插值；取樣率允許時涵蓋 18 Hz–24 kHz。
 - 音訊支援 MP2／MP3、M4A／M4B／ALAC、WAV、AAC、FLAC、OGG／OPUS、AIFF、CAF、WMA、APE、WavPack、AC-3、AMR 與 MKA。
 - FLAC 優先使用 WebKit 原生解碼；若原生解碼失敗，會自動建立暫存 M4A 相容檔。
-- 安裝本機 `ffmpeg` 後，可將 MKV 自動轉封裝或轉碼為暫存 MP4 播放。
+- 發布 App 已內建 LGPL FFmpeg，可將 MKV 自動轉封裝或轉碼為暫存 MP4 播放；開發模式沒有 Bundle 時才使用本機 `ffmpeg`。
 - MKV 改封裝成功後可選擇將可播放檔保存至原資料夾，並把原始檔移至垃圾桶，之後可直接播放而不必再次轉換。
 - 自動配對同目錄的 VTT、SRT、ASS、SSA、SMI 與文字型 SUB 字幕。
 - 在「下載項目」貼上或拖入公開 HTTP/HTTPS 網址，自動下載圖片、影片、文章與一般檔案；可直接存取的影片頁會解析 HTML／內嵌腳本中的 `.m3u8`。
@@ -50,7 +50,7 @@
 - Node.js 與 npm
 - Xcode Command Line Tools
 - `rsync`
-- `ffmpeg`（選用，MKV 與非原生音訊相容播放需要，可用 `brew install ffmpeg` 安裝）
+- `pkg-config`、libopus、libvpx（建立內建 LGPL FFmpeg 時需要，可用 `brew install pkg-config opus libvpx` 安裝）
 
 建置腳本會使用 `go.mod` 指定的 Wails v2 版本。
 
@@ -72,6 +72,7 @@ cd FastFileViewer
 ## 建置 macOS App
 
 ```bash
+./scripts/build-ffmpeg-macos.sh
 ./build.sh
 ```
 
@@ -88,15 +89,9 @@ dist/FastFileViewer.app
 - `Licenses/THIRD-PARTY-LICENSES.txt`
 - `build-metadata.json`
 
-預先建置版本及 SHA-256 校驗檔可由 [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) 取得。
+預先建置版本可由 [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) 取得。
 
-使用 Developer ID 簽署並送交 Apple 公證的 DMG：
-
-```bash
-./package-dmg.command
-```
-
-無參數執行或雙擊 `.command` 時，會直接使用 `dist/FastFileViewer.app`。正式 tag 發布請執行 `./package-dmg.command --build`，此時才會要求乾淨工作樹與精確 tag。DMG 流程不需要 App Store provisioning profile，會自動偵測可用的 `VaderApp` notarytool Keychain Profile。
+DMG 發布工具與簽署憑證設定不包含在 Repository；請在私有發布環境中執行發布流程。
 
 ## 資料與隱私
 
