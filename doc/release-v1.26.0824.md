@@ -41,13 +41,5 @@ FastFileViewer is now a local-first file, media, archive, and download workspace
 
 ## Install
 
-1. Download `FastFileViewer-1.26.0824-arm64.dmg` and its `.sha256` file.
-2. Verify the download with `shasum -a 256 -c FastFileViewer-1.26.0824-arm64.dmg.sha256`.
-3. Open the DMG and drag FastFileViewer to Applications.
-
-## Source and License
-
-- Source: https://github.com/VaderChen/FastFileViewer/tree/v1.26.0824
-- License: GNU GPL v3, with a separate commercial license available
-- Security policy: https://github.com/VaderChen/FastFileViewer/blob/v1.26.0824/SECURITY.md
-- Third-party notices: https://github.com/VaderChen/FastFileViewer/blob/v1.26.0824/THIRD-PARTY-NOTICES.md
+1. Download `FastFileViewer-1.26.0824-arm64.dmg`.
+2. Open the DMG and drag FastFileViewer to Applications.
