@@ -8,6 +8,7 @@ APP_NAME="FastFileViewer"
 APP_OUTPUT_DIR="${APP_OUTPUT_DIR:-$SCRIPT_DIR/dist}"
 APP_PATH="$APP_OUTPUT_DIR/$APP_NAME.app"
 APP_ICON_SOURCE="$SCRIPT_DIR/assets/appicon.png"
+FFMPEG_BIN_DIR="${FASTFILEVIEWER_FFMPEG_BIN_DIR:-$SCRIPT_DIR/third_party/ffmpeg/bin}"
 TMP_ROOT=""
 LOCAL_BUILD_CACHE="${FASTFILEVIEWER_BUILD_CACHE:-${TMPDIR:-/tmp}/fastfileviewer-build-cache}"
 
@@ -78,7 +79,64 @@ cleanup_codesign_artifacts() {
   fi
 }
 
-required_commands=(go node npm rsync codesign ditto security)
+prepare_bundled_ffmpeg() {
+  local source_dir="$FFMPEG_BIN_DIR"
+  local resource_dir="$STAGING_APP_PATH/Contents/Resources/bin"
+  local resource_lib_dir="$STAGING_APP_PATH/Contents/Resources/lib"
+  local tool library dependency version_line configuration_line
+
+  if [[ ! -d "$source_dir" ]]; then
+    echo "找不到 LGPL FFmpeg：$source_dir"
+    echo "請先執行 scripts/build-ffmpeg-macos.sh，或設定 FASTFILEVIEWER_FFMPEG_BIN_DIR。"
+    exit 1
+  fi
+  for tool in ffmpeg ffprobe; do
+    if [[ ! -x "$source_dir/$tool" ]]; then
+      echo "FFmpeg 目錄缺少可執行檔：$source_dir/$tool"
+      exit 1
+    fi
+    version_line="$($source_dir/$tool -version | head -1 || true)"
+    configuration_line="$($source_dir/$tool -version | sed -n 's/^configuration: //p' || true)"
+    if [[ "$configuration_line" == *"--enable-gpl"* || "$configuration_line" == *"--enable-nonfree"* || "$configuration_line" == *"libx264"* || "$configuration_line" == *"libx265"* || "$configuration_line" == *"libxvid"* ]]; then
+      echo "拒絕打包非 LGPL FFmpeg：$version_line"
+      echo "請使用未啟用 GPL/nonfree 或 GPL 外部編碼器的建置。"
+      exit 1
+    fi
+    echo "檢查 LGPL FFmpeg：$version_line"
+  done
+  mkdir -p "$resource_dir"
+  cp "$source_dir/ffmpeg" "$source_dir/ffprobe" "$resource_dir/"
+  chmod 755 "$resource_dir/ffmpeg" "$resource_dir/ffprobe"
+  if [[ ! -d "$source_dir/../lib" ]] || [[ -z "$(find "$source_dir/../lib" -maxdepth 1 -name '*.dylib' -print -quit)" ]]; then
+    echo "FFmpeg 目錄缺少動態函式庫：$source_dir/../lib"
+    exit 1
+  fi
+  mkdir -p "$resource_lib_dir"
+  rsync -a --include '*.dylib' --exclude '*' "$source_dir/../lib/" "$resource_lib_dir/"
+  if [[ ! -s "$source_dir/../share/licenses/ffmpeg/COPYING.LGPLv2.1" ]]; then
+    echo "FFmpeg 目錄缺少 LGPL 授權文字。"
+    exit 1
+  fi
+  cp "$source_dir/../share/licenses/ffmpeg/COPYING.LGPLv2.1" "$APP_LICENSE_DIR/LGPL-2.1-FFmpeg.txt"
+  cp "$source_dir/../share/licenses/opus/COPYING" "$APP_LICENSE_DIR/Opus-COPYING.txt"
+  cp "$source_dir/../share/licenses/libvpx/LICENSE" "$APP_LICENSE_DIR/libvpx-LICENSE.txt"
+  for library in $(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' -print); do
+    install_name_tool -id "@rpath/$(basename "$library")" "$library"
+    while IFS= read -r dependency; do
+      [[ -e "$resource_lib_dir/$(basename "$dependency")" ]] || continue
+      install_name_tool -change "$dependency" "@rpath/$(basename "$dependency")" "$library"
+    done < <(otool -L "$library" | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p')
+  done
+  for tool in ffmpeg ffprobe; do
+    install_name_tool -add_rpath '@executable_path/../lib' "$resource_dir/$tool" 2>/dev/null || true
+    while IFS= read -r dependency; do
+      [[ -e "$resource_lib_dir/$(basename "$dependency")" ]] || continue
+      install_name_tool -change "$dependency" "@rpath/$(basename "$dependency")" "$resource_dir/$tool"
+    done < <(otool -L "$resource_dir/$tool" | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p')
+  done
+}
+
+required_commands=(go node npm rsync codesign ditto security install_name_tool otool)
 for command_name in "${required_commands[@]}"; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "缺少必要指令：$command_name"
@@ -210,11 +268,27 @@ node "$STAGING_DIR/scripts/write-build-metadata.mjs" \
   "$STAGING_APP_PATH/Contents/Resources/build-metadata.json" \
   "$APP_MARKETING_VERSION" "$BUILD_COMMIT" "$BUILD_TAG" "$BUILD_STATE" "$BUILD_SOURCE_URL"
 
+prepare_bundled_ffmpeg
+
 rm -f "$STAGING_APP_PATH/Contents/embedded.provisionprofile"
 cleanup_appledouble "$STAGING_APP_PATH"
 cleanup_codesign_artifacts "$STAGING_APP_PATH"
 chmod -R u+rwX,go+rX "$STAGING_APP_PATH"
 xattr -cr "$STAGING_APP_PATH" 2>/dev/null || true
+
+if [[ -d "$STAGING_APP_PATH/Contents/Resources/bin" ]]; then
+  NESTED_SIGNING_ARGUMENTS=(--force --sign "$CODESIGN_IDENTITY" --options runtime)
+  if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+    NESTED_SIGNING_ARGUMENTS+=(--timestamp)
+  fi
+  for nested_binary in $(find "$STAGING_APP_PATH/Contents/Resources/lib" -maxdepth 1 -type f -name '*.dylib' -print); do
+    codesign "${NESTED_SIGNING_ARGUMENTS[@]}" "$nested_binary"
+  done
+  for nested_binary in "$STAGING_APP_PATH/Contents/Resources/bin/ffmpeg" "$STAGING_APP_PATH/Contents/Resources/bin/ffprobe"; do
+    codesign "${NESTED_SIGNING_ARGUMENTS[@]}" \
+      --entitlements "$STAGING_DIR/build/darwin/FFmpeg.entitlements.plist" "$nested_binary"
+  done
+fi
 
 SIGNING_ARGUMENTS=(--force --deep --sign "$CODESIGN_IDENTITY" --options runtime)
 if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
