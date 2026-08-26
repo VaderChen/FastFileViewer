@@ -30,7 +30,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - 最低 macOS：12.0
 - 架構：Apple Silicon arm64
 
-公開版不啟用 App Sandbox，也不包含本機發布憑證或個人化設定。
+公開版不啟用 App Sandbox，也不包含個人化設定。
 
 ## 技術組成
 
@@ -156,14 +156,6 @@ BUILD_SOURCE_URL=https://github.com/example/FastFileViewer \
 6. 移除不屬於公開建置的本機發布資產並完成 App Bundle 封裝。
 7. 完成 App Bundle 並輸出 `dist/FastFileViewer.app`。
 
-Developer ID DMG：
-
-```bash
-./package-dmg.command
-```
-
-無參數執行或雙擊 `package-dmg.command` 時，預設簽署目前 `dist/FastFileViewer.app`；輸出檔名會包含版本與 build label。正式流程使用 `./package-dmg.command --build`，會要求已追蹤工作樹乾淨、HEAD 具有精確版本 tag。兩種模式都會自動偵測 `Developer ID Application` 與 `VaderApp`、`FastFileViewer-notary`、`notarytool` 等 notarytool Keychain Profile。
-
 ## 授權清冊
 
 手動更新：
@@ -177,8 +169,8 @@ node scripts/generate-third-party-notices.mjs
 ## GitHub 公開前檢查
 
 1. 確認 `cert/`、`build/bin/`、`dist/`、`frontend/dist/` 未加入 Git。
-2. 搜尋 Token、本機發布憑證、個人絕對路徑與安裝包。
+2. 搜尋 Token、個人絕對路徑與安裝包。
 3. 執行完整 `./build.sh`。
 4. 驗證 App 內含 `Contents/Resources/Licenses` 與 `build-metadata.json`。
 5. 確認 About 顯示 GPLv3、來源 URL 與 commit/tag/build state。
-6. 建立 Git tag 後再製作公開 Release，並核對下載檔與 SHA-256 校驗檔。
+6. 建立 Git tag 後再製作公開 Release，並核對下載檔。

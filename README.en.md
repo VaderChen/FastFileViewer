@@ -68,13 +68,11 @@ The output is `dist/FastFileViewer.app`. The build runs Go and frontend verifica
 
 Prebuilt downloads are available from [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases).
 
-DMG release tools and signing credentials are intentionally kept outside this repository and must be run from a private release environment.
-
 ## Privacy and Security
 
 Scanning, rendering, thumbnails, playback, and content analysis stay local. FastFileViewer only makes an outbound HTTP/HTTPS connection after the user explicitly pastes or drops a URL into Downloads. The downloader does not use browser cookies, login state, or custom credentials; it does not support DRM, paywalls, encrypted HLS, or live HLS. The page resolver does not execute JavaScript: it scans at most 32 MB of HTML and inline script text, returns at most 16 `.m3u8` candidates, and sends only a query-free Referer/Origin derived from the source page. Sites that require browser cookies, login, or anti-bot verification are not bypassed and require a direct `.m3u8` URL. Localhost, private, link-local, and other non-public network addresses are rejected on every request and redirect. Downloads are limited to 4 GB per file and are saved under `~/Downloads/FastFileViewer`.
 
-FastFileViewer does not execute displayed source code or raw Markdown HTML and does not load remote Markdown resources. Do not commit `cert/`, `.env*`, signing assets, packages, personal files, or unredacted debug data. See [SECURITY.md](SECURITY.md).
+FastFileViewer does not execute displayed source code or raw Markdown HTML and does not load remote Markdown resources. Do not commit `.env*`, packages, personal files, or unredacted debug data. See [SECURITY.md](SECURITY.md).
 
 ## License
 
