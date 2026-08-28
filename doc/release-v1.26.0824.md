@@ -21,7 +21,8 @@ FastFileViewer is now a local-first file, media, archive, and download workspace
 ### Music Visualization
 
 - Added selectable spectrum bars, waveform, and combined visualization modes with persistent preference.
-- Added 72 logarithmic centre frequencies with linear interpolation over a 32768-point floating-decibel FFT across 18 Hz to 24 kHz when permitted by the source sample rate.
+- Added a persistent `Colors` control that slowly cycles spectrum BAR colors through warm and cool hues, or keeps them fixed green when disabled.
+- Added 72 logarithmic centre frequencies with linear interpolation over a 32768-point floating-decibel FFT across 10 Hz to 20 kHz when permitted by the source sample rate.
 - Bounded waveform rendering to 1,600 points for responsive playback.
 - Preserved music time, play/pause, volume, and mute state while browsing images and documents; selecting a video pauses retained audio.
 - Added automatic next-track playback that skips non-audio entries and wraps through the current library order.

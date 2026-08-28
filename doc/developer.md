@@ -13,7 +13,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - 掃描、Render、快取與內容分析完全在本機進行，不執行程式碼或 Markdown 原始 HTML。
 - 本機影音採可跳轉串流，壓縮檔影音使用生命週期受控的暫存檔。
 - MKV 在偵測到本機 `ffmpeg` 時，優先轉封裝並在必要時使用 VideoToolbox 轉碼成暫存 MP4。
-- 音樂播放器透過 Web Audio API 的 `AnalyserNode` 繪製即時頻譜與波形，暫停時停止動畫更新；頻譜使用 32768-point floating-decibel FFT，以 72 個對數中心頻率線性插值，目標涵蓋 18 Hz–24 kHz，並受來源取樣率的 Nyquist 上限約束。波形依畫布寬度降採樣至最多 1,600 點。
+- 音樂播放器透過 Web Audio API 的 `AnalyserNode` 繪製即時頻譜與波形，暫停時停止動畫更新；頻譜使用 32768-point floating-decibel FFT，以 72 個對數中心頻率線性插值，目標涵蓋 10 Hz–20 kHz，並受來源取樣率的 Nyquist 上限約束。波形依畫布寬度降採樣至最多 1,600 點。
 - MP2／MP3、M4A／M4B、WAV、AAC、FLAC、OGG／OPUS、AIFF 與 CAF 優先原生播放；FLAC 等原生解碼失敗時自動要求相容 M4A。
 - WMA、APE、WavPack、獨立 ALAC、AC-3、AMR 與 MKA 直接透過本機 `ffmpeg` 轉為 256 kbps AAC M4A 暫存檔；MKV 先嘗試改封裝，失敗時才使用 VideoToolbox 轉碼。
 - MKV 改封裝完成後，使用者可選擇把可播放檔保存至原資料夾並將原檔移至垃圾桶；取消時維持原檔與暫存播放流程。
@@ -50,7 +50,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `internal/app/download.go`：安全 URL 驗證、下載佇列、進度、持久化及 HLS VOD 合併。
 - `internal/app/types.go`：前後端資料模型。
 - `frontend/src/App.tsx`：內容樹、Viewer、工作區、設定與 About 授權資訊。
-- `frontend/src/MediaPlayer.tsx`：影片與音訊播放、Web Audio 頻譜／波形、相容音訊 fallback、控制列及字幕掛載。
+- `frontend/src/MediaPlayer.tsx`：影片與音訊播放、Web Audio 頻譜／波形、相容音訊 fallback、控制列及字幕掛載；音訊 BAR 的 `Colors` 狀態會控制是否以緩慢色相循環顯示。
 - `frontend/src/mediaSupport.ts`：sidecar 字幕配對與 WebVTT 轉換。
 - `frontend/src/useImageViewer.ts`、`frontend/src/imageLayout.ts`：圖片縮放、旋轉、置中、拖曳平移與版面計算。
 - `frontend/src/useWorkspace.ts`、`frontend/src/libraryTree.ts`：內容工作區篩選、分批載入、選取、匯出、重複偵測與樹狀資料合併。

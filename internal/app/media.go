@@ -14,8 +14,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const mediaURLPrefix = "/media/"
@@ -189,9 +187,9 @@ func (s *MediaService) ReleasePlaybackCache(filePath string) error {
 	return nil
 }
 
-// ConfirmRemuxedOriginalCleanup 會詢問是否把改封裝結果保存到原資料夾，並將原始影片移到垃圾桶。
-// 回傳保存後的新項目供前端更新清單；ID 為空字串代表沒有任何變更。對話框文字由前端依語系傳入。
-func (s *MediaService) ConfirmRemuxedOriginalCleanup(filePath string, title string, message string, confirmLabel string, cancelLabel string) (ImageEntry, error) {
+// ReplaceRemuxedOriginal 將已完成的改封裝結果保存到原資料夾，並把原始影片移到垃圾桶。
+// 使用者確認由前端自訂對話框處理，此方法不呼叫系統對話框。
+func (s *MediaService) ReplaceRemuxedOriginal(filePath string) (ImageEntry, error) {
 	entry, err := entryByPath(filePath)
 	if err != nil {
 		return ImageEntry{}, err
@@ -204,22 +202,8 @@ func (s *MediaService) ConfirmRemuxedOriginalCleanup(filePath string, title stri
 		return ImageEntry{}, nil
 	}
 	targetPath := filepath.Join(entry.DirectoryPath, strings.TrimSuffix(entry.Name, filepath.Ext(entry.Name))+filepath.Ext(cachedPath))
-	// 同名檔案已存在時不覆寫，也不詢問。
+	// 同名檔案已存在時不覆寫。
 	if _, err := os.Stat(targetPath); err == nil {
-		return ImageEntry{}, nil
-	}
-	selection, err := wailsruntime.MessageDialog(s.ctx, wailsruntime.MessageDialogOptions{
-		Type:          wailsruntime.QuestionDialog,
-		Title:         title,
-		Message:       message,
-		Buttons:       []string{confirmLabel, cancelLabel},
-		DefaultButton: cancelLabel,
-		CancelButton:  cancelLabel,
-	})
-	if err != nil {
-		return ImageEntry{}, err
-	}
-	if selection != confirmLabel {
 		return ImageEntry{}, nil
 	}
 	return s.replaceOriginalWithRemux(entry, cachedPath, targetPath)

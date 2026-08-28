@@ -42,7 +42,7 @@ import {
   faTriangleExclamation,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
-import { ClipboardSetText, WindowFullscreen, WindowIsFullscreen, WindowSetTitle, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
+import { ClipboardSetText, EventsOn, WindowFullscreen, WindowIsFullscreen, WindowSetTitle, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
 import { isMediaKind, isPlaybackMediaKind } from './types';
 import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
@@ -58,6 +58,7 @@ import { formatBytes } from './format';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
 import { MediaPlayer } from './MediaPlayer';
 import { findNextAudioEntry, findSidecarSubtitle } from './mediaSupport';
+import appIconURL from '../../assets/appicon.png';
 
 const fallbackBootstrap: BootstrapPayload = {
   defaultPath: '',
@@ -126,6 +127,13 @@ const messages = {
     pickImage: '請從左側選擇圖片、文件或媒體',
     loadingMedia: '準備影音播放中',
     mediaPlaybackFailed: '無法播放此影音，可能是系統不支援該編碼格式',
+    mediaConversionConfirmTitle: '需要轉換',
+    mediaConversionConfirmMessage: '「{name}」需要先轉換成可播放格式，是否開始？',
+    mediaConversionConfirm: '開始轉換',
+    mediaConversionCancel: '取消',
+    mediaConversionCancelled: '已取消轉換',
+    mediaConversionProgressTitle: '正在轉換',
+    mediaConversionProgressMessage: '正在轉換「{name}」，請稍候…',
     mediaRemuxCleanupTitle: '改封裝完成',
     mediaRemuxCleanupMessage: '「{name}」需要改封裝才能播放。要把改封裝後的檔案存到同一個資料夾，並把原始檔移到垃圾桶嗎？之後開啟就不必再轉換。',
     mediaRemuxCleanupConfirm: '保存並移到垃圾桶',
@@ -141,6 +149,7 @@ const messages = {
     mediaSubtitlesOff: '關閉字幕',
     mediaSeek: '播放進度',
     musicVisualizer: '音樂頻譜視覺化',
+    musicColors: 'Colors',
     musicSpectrum: '柱狀頻譜',
     musicWaveform: '波形',
     musicVisualizationBoth: '全部顯示',
@@ -301,6 +310,13 @@ const messages = {
     pickImage: 'Choose an image, document, or media item on the left',
     loadingMedia: 'Preparing media playback',
     mediaPlaybackFailed: 'Unable to play this media. Its codec may not be supported by the system.',
+    mediaConversionConfirmTitle: 'Conversion required',
+    mediaConversionConfirmMessage: '"{name}" must be converted to a playable format first. Start conversion?',
+    mediaConversionConfirm: 'Start conversion',
+    mediaConversionCancel: 'Cancel',
+    mediaConversionCancelled: 'Conversion cancelled',
+    mediaConversionProgressTitle: 'Converting',
+    mediaConversionProgressMessage: 'Converting "{name}". Please wait…',
     mediaRemuxCleanupTitle: 'Remux complete',
     mediaRemuxCleanupMessage: '"{name}" had to be remuxed before it could play. Save the remuxed file in the same folder and move the original to the Trash? Future playback will not need converting again.',
     mediaRemuxCleanupConfirm: 'Save and move to Trash',
@@ -316,6 +332,7 @@ const messages = {
     mediaSubtitlesOff: 'Turn subtitles off',
     mediaSeek: 'Playback position',
     musicVisualizer: 'Music spectrum visualizer',
+    musicColors: 'Colors',
     musicSpectrum: 'Spectrum bars',
     musicWaveform: 'Waveform',
     musicVisualizationBoth: 'Show both',
@@ -476,6 +493,13 @@ const messages = {
     pickImage: '左側で画像、文書、またはメディアを選択してください',
     loadingMedia: 'メディアを準備中',
     mediaPlaybackFailed: 'このメディアを再生できません。システムがコーデックに対応していない可能性があります。',
+    mediaConversionConfirmTitle: '変換が必要です',
+    mediaConversionConfirmMessage: '「{name}」は再生可能な形式への変換が必要です。変換を開始しますか？',
+    mediaConversionConfirm: '変換を開始',
+    mediaConversionCancel: 'キャンセル',
+    mediaConversionCancelled: '変換をキャンセルしました',
+    mediaConversionProgressTitle: '変換中',
+    mediaConversionProgressMessage: '「{name}」を変換しています。しばらくお待ちください…',
     mediaRemuxCleanupTitle: 'コンテナ変換が完了しました',
     mediaRemuxCleanupMessage: '「{name}」は再生のためにコンテナ変換が必要でした。変換後のファイルを同じフォルダに保存し、元のファイルをゴミ箱に移動しますか？次回からは変換が不要になります。',
     mediaRemuxCleanupConfirm: '保存してゴミ箱へ移動',
@@ -491,6 +515,7 @@ const messages = {
     mediaSubtitlesOff: '字幕をオフ',
     mediaSeek: '再生位置',
     musicVisualizer: '音楽スペクトラム表示',
+    musicColors: 'Colors',
     musicSpectrum: 'スペクトラム',
     musicWaveform: '波形',
     musicVisualizationBoth: '両方表示',
@@ -710,6 +735,7 @@ export default function App() {
   const [enabledMediaExtensions, setEnabledMediaExtensions] = useState<string[]>(() => resolveInitialEnabledMediaExtensions());
   const locale = useMemo(() => resolveLocale(languagePreference), [languagePreference]);
   const [rootPath, setRootPath] = useState('');
+  const [pendingOpenFilePath, setPendingOpenFilePath] = useState('');
   const [tree, setTree] = useState<LibraryNode | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
@@ -892,6 +918,30 @@ export default function App() {
   }, [bootstrap.supportedImages, bootstrapReady]);
 
   useEffect(() => {
+    let unsubscribeOpenFile: (() => void) | undefined;
+    try {
+      unsubscribeOpenFile = EventsOn('fastfileviewer:file-open', () => {
+        void Promise.resolve(window.go?.app?.App?.ConsumeOpenFilePaths?.())
+          .then((paths) => {
+            const latestPath = paths?.[paths.length - 1]?.trim();
+            if (latestPath) {
+              setPendingOpenFilePath(latestPath);
+            }
+          })
+          .catch(() => undefined);
+      });
+    } catch {
+      // 瀏覽器開發模式沒有 Wails runtime，忽略事件註冊即可。
+    }
+    void Promise.resolve(window.go?.app?.App?.ConsumeOpenFilePaths?.())
+      .then((paths) => {
+        const latestPath = paths?.[paths.length - 1]?.trim();
+        if (latestPath) {
+          setPendingOpenFilePath(latestPath);
+        }
+      })
+      .catch(() => undefined);
+
     void window.go?.app?.App?.Bootstrap?.()
       .then(async (payload) => {
         const supportedMedia = payload.supportedMedia?.length ? payload.supportedMedia : fallbackBootstrap.supportedMedia;
@@ -922,6 +972,8 @@ export default function App() {
         }
       })
       .catch(() => undefined);
+
+    return () => unsubscribeOpenFile?.();
   }, []);
 
   useEffect(() => {
@@ -1486,6 +1538,37 @@ export default function App() {
     }
   };
 
+  // macOS 以此 App 開啟檔案時，掃描檔案所在資料夾後選取該檔案。
+  useEffect(() => {
+    const requestedPath = pendingOpenFilePath.trim();
+    if (!requestedPath || !bootstrapReady) {
+      return;
+    }
+    const directoryPath = directoryPathForFile(requestedPath);
+    const sameDirectory = normalizeFilePath(rootPath) === normalizeFilePath(directoryPath);
+    if (!sameDirectory || !tree) {
+      if (!scanning) {
+        setLibrarySourceTab('current');
+        setRootPath(directoryPath);
+        void handleScan(directoryPath);
+      }
+      return;
+    }
+    if (scanning) {
+      return;
+    }
+    const target = navigationImages.find((item) => normalizeFilePath(item.image.path) === normalizeFilePath(requestedPath));
+    if (!target) {
+      setPendingOpenFilePath('');
+      return;
+    }
+    setSelectedNodeId(target.node.id);
+    setSelectedImageId(target.image.id);
+    setSelectedImageIds(new Set([target.image.id]));
+    setSelectionAnchorId(target.image.id);
+    setPendingOpenFilePath('');
+  }, [bootstrapReady, handleScan, navigationImages, pendingOpenFilePath, rootPath, scanning, tree]);
+
   const moveSelection = (offset: number) => {
     if (navigationImages.length === 0) {
       return;
@@ -1989,6 +2072,13 @@ export default function App() {
   const mediaPlayerLabels = {
     loading: t.loadingMedia,
     playbackFailed: t.mediaPlaybackFailed,
+    conversionConfirmTitle: t.mediaConversionConfirmTitle,
+    conversionConfirmMessage: t.mediaConversionConfirmMessage,
+    conversionConfirm: t.mediaConversionConfirm,
+    conversionCancel: t.mediaConversionCancel,
+    conversionCancelled: t.mediaConversionCancelled,
+    conversionProgressTitle: t.mediaConversionProgressTitle,
+    conversionProgressMessage: t.mediaConversionProgressMessage,
     remuxCleanupTitle: t.mediaRemuxCleanupTitle,
     remuxCleanupMessage: t.mediaRemuxCleanupMessage,
     remuxCleanupConfirm: t.mediaRemuxCleanupConfirm,
@@ -2005,6 +2095,7 @@ export default function App() {
     fullscreen: t.fullscreen,
     seek: t.mediaSeek,
     visualizer: t.musicVisualizer,
+    colors: t.musicColors,
     spectrum: t.musicSpectrum,
     waveform: t.musicWaveform,
     bothVisualizations: t.musicVisualizationBoth,
@@ -2020,10 +2111,13 @@ export default function App() {
     >
       <aside className="library-panel">
         <div className="brand-bar">
-          <div>
-            <div className="brand-title">{t.appName}</div>
-            <div className="brand-subtitle">
-              {totalImages.toLocaleString()} {t.imageCount} · {totalDocuments.toLocaleString()} {t.documentCount} · {totalMedia.toLocaleString()} {t.mediaCount} · {totalArchives.toLocaleString()} {t.archiveCount}
+          <div className="brand-identity">
+            <img className="brand-icon" src={appIconURL} alt="" aria-hidden="true" />
+            <div className="brand-copy">
+              <div className="brand-title">{t.appName}</div>
+              <div className="brand-subtitle">
+                {totalImages.toLocaleString()} {t.imageCount} · {totalDocuments.toLocaleString()} {t.documentCount} · {totalMedia.toLocaleString()} {t.mediaCount} · {totalArchives.toLocaleString()} {t.archiveCount}
+              </div>
             </div>
           </div>
           <div className="brand-actions">
@@ -3521,6 +3615,20 @@ function normalizePinnedDirectory(directoryPath: string): string {
     return '';
   }
   return trimmedPath.replace(/\/+$/, '') || '/';
+}
+
+function normalizeFilePath(filePath: string): string {
+  const normalized = filePath.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  if (normalized.length > 1) {
+    return normalized.replace(/\/$/, '');
+  }
+  return normalized;
+}
+
+function directoryPathForFile(filePath: string): string {
+  const normalized = normalizeFilePath(filePath);
+  const separatorIndex = normalized.lastIndexOf('/');
+  return separatorIndex <= 0 ? '/' : normalized.slice(0, separatorIndex);
 }
 
 function pinnedDirectoryName(directoryPath: string): string {

@@ -12,6 +12,13 @@ import {
 interface MediaPlayerLabels {
   loading: string;
   playbackFailed: string;
+  conversionConfirmTitle: string;
+  conversionConfirmMessage: string;
+  conversionConfirm: string;
+  conversionCancel: string;
+  conversionCancelled: string;
+  conversionProgressTitle: string;
+  conversionProgressMessage: string;
   remuxCleanupTitle: string;
   remuxCleanupMessage: string;
   remuxCleanupConfirm: string;
@@ -28,6 +35,7 @@ interface MediaPlayerLabels {
   fullscreen: string;
   seek: string;
   visualizer: string;
+  colors: string;
   spectrum: string;
   waveform: string;
   bothVisualizations: string;
@@ -59,6 +67,7 @@ interface AudioGraph {
 }
 
 type AudioVisualizationMode = 'spectrum' | 'waveform' | 'both';
+type ConversionDialogState = { phase: 'confirm' | 'progress'; name: string };
 
 const audioGraphs = new WeakMap<HTMLAudioElement, AudioGraph>();
 const audioVisualizationStorageKey = 'fastfileviewer.audioVisualizationMode';
@@ -71,6 +80,8 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   const audioAnimationRef = useRef<number | null>(null);
   const audioFallbackAttemptedRef = useRef(false);
   const remuxCleanupPromptRef = useRef<Promise<unknown> | null>(null);
+  const remuxCleanupDecisionRef = useRef<((approved: boolean) => void) | null>(null);
+  const conversionDecisionRef = useRef<((approved: boolean) => void) | null>(null);
   const prepareOperationRef = useRef(0);
   const resumedPlaybackRef = useRef<ResumedVideoPlayback | null>(null);
   const labelsRef = useRef(labels);
@@ -90,6 +101,35 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   const [muted, setMuted] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [audioVisualizationMode, setAudioVisualizationMode] = useState<AudioVisualizationMode>(resolveInitialAudioVisualizationMode);
+  const [colorsEnabled, setColorsEnabled] = useState(() => localStorage.getItem('fastfileviewer.audioVisualizerColors') === 'true');
+  const [conversionDialog, setConversionDialog] = useState<ConversionDialogState | null>(null);
+  const [remuxCleanupDialogName, setRemuxCleanupDialogName] = useState('');
+
+  const askConversionApproval = (name: string): Promise<boolean> => new Promise((resolve) => {
+    conversionDecisionRef.current?.(false);
+    conversionDecisionRef.current = resolve;
+    setConversionDialog({ phase: 'confirm', name });
+  });
+
+  const resolveConversionApproval = (approved: boolean) => {
+    const resolve = conversionDecisionRef.current;
+    conversionDecisionRef.current = null;
+    setConversionDialog(null);
+    resolve?.(approved);
+  };
+
+  const askRemuxCleanupApproval = (name: string): Promise<boolean> => new Promise((resolve) => {
+    remuxCleanupDecisionRef.current?.(false);
+    remuxCleanupDecisionRef.current = resolve;
+    setRemuxCleanupDialogName(name);
+  });
+
+  const resolveRemuxCleanupApproval = (approved: boolean) => {
+    const resolve = remuxCleanupDecisionRef.current;
+    remuxCleanupDecisionRef.current = null;
+    setRemuxCleanupDialogName('');
+    resolve?.(approved);
+  };
 
   const clearControlsHideTimer = () => {
     if (controlsHideTimerRef.current !== null) {
@@ -124,6 +164,10 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   }, [audioVisualizationMode]);
 
   useEffect(() => {
+    localStorage.setItem('fastfileviewer.audioVisualizerColors', String(colorsEnabled));
+  }, [colorsEnabled]);
+
+  useEffect(() => {
     let cancelled = false;
     resumeAudioAfterSourceChangeRef.current = resumeAudioAfterSourceChangeRef.current
       || (entry.kind === 'audio' && audioRef.current !== null && !audioRef.current.paused);
@@ -142,14 +186,31 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
         if (cancelled) {
           return;
         }
+        const needsConversion = requiresMediaConversion(entry);
+        if (needsConversion) {
+          const approved = await askConversionApproval(entry.name);
+          if (!approved || cancelled) {
+            if (!cancelled) {
+              setError(labelsRef.current.conversionCancelled);
+            }
+            return;
+          }
+          setConversionDialog({ phase: 'progress', name: entry.name });
+        }
         const url = await window.go?.app?.MediaService?.PrepareMediaByPath?.(entry.path, operationId);
         if (cancelled || !url) {
           return;
         }
         setMediaURL(url);
         if (entry.kind === 'video' && requiresVideoRemux(entry.format)) {
-          remuxCleanupPromptRef.current = promptRemuxCleanup(entry.path, entry.name, labelsRef.current)
-            ?.then((replacement) => {
+          remuxCleanupPromptRef.current = askRemuxCleanupApproval(entry.name)
+            .then(async (approved) => {
+              if (!approved) {
+                return null;
+              }
+              return window.go?.app?.MediaService?.ReplaceRemuxedOriginal?.(entry.path) ?? null;
+            })
+            .then((replacement) => {
               if (!replacement?.id) {
                 return;
               }
@@ -163,7 +224,8 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
                 };
               }
               onOriginalReplaced?.(replacement, entry.id);
-            }) ?? null;
+            })
+            .catch(() => null);
         }
       } catch (reason: unknown) {
         if (!cancelled) {
@@ -175,11 +237,20 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
               : labelsRef.current.playbackFailed);
         }
       } finally {
+        if (prepareOperationRef.current === operationId) {
+          setConversionDialog(null);
+        }
         finishPrepareOperation(prepareOperationRef, operationId);
       }
     })();
     return () => {
       cancelled = true;
+      conversionDecisionRef.current?.(false);
+      conversionDecisionRef.current = null;
+      setConversionDialog(null);
+      remuxCleanupDecisionRef.current?.(false);
+      remuxCleanupDecisionRef.current = null;
+      setRemuxCleanupDialogName('');
       if (prepareOperationRef.current !== 0) {
         void window.go?.app?.App?.CancelOperation?.(prepareOperationRef.current);
       }
@@ -221,7 +292,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     const waveformData = new Uint8Array(analyser.fftSize);
     const draw = () => {
       if (visible) {
-        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, audio.paused, audioVisualizationMode);
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, audio.paused, audioVisualizationMode, colorsEnabled);
       }
       if (visible && !audio.paused && !audio.ended) {
         audioAnimationRef.current = window.requestAnimationFrame(draw);
@@ -241,7 +312,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
         audioAnimationRef.current = null;
       }
       if (visible) {
-        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode);
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode, colorsEnabled);
       }
     };
     const applyMuteImmediately = () => {
@@ -256,7 +327,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     applyMuteImmediately();
     if (audio.paused || audio.ended) {
       if (visible) {
-        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode);
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode, colorsEnabled);
       }
     } else {
       startDrawing();
@@ -273,7 +344,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
       audioContextRef.current = null;
       releaseAudioGraph(audio, graph);
     };
-  }, [audioVisualizationMode, entry.kind, mediaURL, visible]);
+  }, [audioVisualizationMode, colorsEnabled, entry.kind, mediaURL, visible]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -291,6 +362,13 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     setError('');
     const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
     prepareOperationRef.current = operationId;
+    const approved = await askConversionApproval(entry.name);
+    if (!approved) {
+      setError(labels.conversionCancelled);
+      finishPrepareOperation(prepareOperationRef, operationId);
+      return;
+    }
+    setConversionDialog({ phase: 'progress', name: entry.name });
     try {
       const compatibleURL = await window.go.app.MediaService.PrepareCompatibleMediaByPath(entry.path, operationId);
       if (!compatibleURL) {
@@ -305,6 +383,9 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
           ? reason
           : labels.playbackFailed);
     } finally {
+      if (prepareOperationRef.current === operationId) {
+        setConversionDialog(null);
+      }
       finishPrepareOperation(prepareOperationRef, operationId);
     }
   };
@@ -404,12 +485,56 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     video.webkitEnterFullscreen?.();
   };
 
+  const conversionDialogView = conversionDialog ? (
+    <div className="media-conversion-overlay" role="presentation">
+      <section
+        className="media-conversion-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={conversionDialog.phase === 'confirm' ? labels.conversionConfirmTitle : labels.conversionProgressTitle}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {conversionDialog.phase === 'progress' ? <span className="media-conversion-spinner" aria-hidden="true" /> : <span className="media-conversion-icon" aria-hidden="true">↻</span>}
+        <strong>{conversionDialog.phase === 'confirm' ? labels.conversionConfirmTitle : labels.conversionProgressTitle}</strong>
+        <p>{(conversionDialog.phase === 'confirm' ? labels.conversionConfirmMessage : labels.conversionProgressMessage).replace('{name}', conversionDialog.name)}</p>
+        {conversionDialog.phase === 'confirm' ? (
+          <footer>
+            <button type="button" className="media-conversion-cancel" onClick={() => resolveConversionApproval(false)}>{labels.conversionCancel}</button>
+            <button type="button" className="media-conversion-confirm" onClick={() => resolveConversionApproval(true)}>{labels.conversionConfirm}</button>
+          </footer>
+        ) : null}
+      </section>
+    </div>
+  ) : null;
+
+  const remuxCleanupDialogView = remuxCleanupDialogName ? (
+    <div className="media-conversion-overlay" role="presentation">
+      <section
+        className="media-conversion-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={labels.remuxCleanupTitle}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <span className="media-conversion-icon media-conversion-complete" aria-hidden="true">✓</span>
+        <strong>{labels.remuxCleanupTitle}</strong>
+        <p>{labels.remuxCleanupMessage.replace('{name}', remuxCleanupDialogName)}</p>
+        <footer>
+          <button type="button" className="media-conversion-cancel" onClick={() => resolveRemuxCleanupApproval(false)}>{labels.remuxCleanupCancel}</button>
+          <button type="button" className="media-conversion-confirm" onClick={() => resolveRemuxCleanupApproval(true)}>{labels.remuxCleanupConfirm}</button>
+        </footer>
+      </section>
+    </div>
+  ) : null;
+
   if (!mediaURL && !error) {
-    return <div className="media-player-status">{labels.loading}</div>;
+    return <div className="media-player-status">{labels.loading}{conversionDialogView}{remuxCleanupDialogView}</div>;
   }
 
   return (
     <div className={`media-player ${entry.kind}`}>
+      {conversionDialogView}
+      {remuxCleanupDialogView}
       {entry.kind === 'video' && mediaURL ? (
         <div
           ref={videoFrameRef}
@@ -528,31 +653,42 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
           </div>
           <div className="audio-visualizer-toolbar">
             <span>{labels.visualizer}</span>
-            <div role="group" aria-label={labels.visualizer}>
+            <div className="audio-visualizer-actions">
               <button
-                className={audioVisualizationMode === 'spectrum' ? 'active' : ''}
+                className={`audio-colors-button ${colorsEnabled ? 'active' : ''}`}
                 type="button"
-                aria-pressed={audioVisualizationMode === 'spectrum'}
-                onClick={() => setAudioVisualizationMode('spectrum')}
+                aria-pressed={colorsEnabled}
+                onClick={() => setColorsEnabled((current) => !current)}
               >
-                {labels.spectrum}
+                <span className="audio-status-dot" aria-hidden="true" />
+                {labels.colors}
               </button>
-              <button
-                className={audioVisualizationMode === 'waveform' ? 'active' : ''}
-                type="button"
-                aria-pressed={audioVisualizationMode === 'waveform'}
-                onClick={() => setAudioVisualizationMode('waveform')}
-              >
-                {labels.waveform}
-              </button>
-              <button
-                className={audioVisualizationMode === 'both' ? 'active' : ''}
-                type="button"
-                aria-pressed={audioVisualizationMode === 'both'}
-                onClick={() => setAudioVisualizationMode('both')}
-              >
-                {labels.bothVisualizations}
-              </button>
+              <div role="group" aria-label={labels.visualizer}>
+                <button
+                  className={audioVisualizationMode === 'spectrum' ? 'active' : ''}
+                  type="button"
+                  aria-pressed={audioVisualizationMode === 'spectrum'}
+                  onClick={() => setAudioVisualizationMode('spectrum')}
+                >
+                  {labels.spectrum}
+                </button>
+                <button
+                  className={audioVisualizationMode === 'waveform' ? 'active' : ''}
+                  type="button"
+                  aria-pressed={audioVisualizationMode === 'waveform'}
+                  onClick={() => setAudioVisualizationMode('waveform')}
+                >
+                  {labels.waveform}
+                </button>
+                <button
+                  className={audioVisualizationMode === 'both' ? 'active' : ''}
+                  type="button"
+                  aria-pressed={audioVisualizationMode === 'both'}
+                  onClick={() => setAudioVisualizationMode('both')}
+                >
+                  {labels.bothVisualizations}
+                </button>
+              </div>
             </div>
           </div>
           <canvas
@@ -649,18 +785,9 @@ function requiresVideoRemux(format: string): boolean {
   return ['.mkv', '.avi', '.m2ts'].includes(format.toLowerCase());
 }
 
-function promptRemuxCleanup(filePath: string, name: string, labels: MediaPlayerLabels): Promise<ImageEntry | null> | null {
-  const confirmCleanup = window.go?.app?.MediaService?.ConfirmRemuxedOriginalCleanup;
-  if (!confirmCleanup) {
-    return null;
-  }
-  return confirmCleanup(
-    filePath,
-    labels.remuxCleanupTitle,
-    labels.remuxCleanupMessage.replace('{name}', name),
-    labels.remuxCleanupConfirm,
-    labels.remuxCleanupCancel,
-  ).catch(() => null);
+function requiresMediaConversion(entry: ImageEntry): boolean {
+  return (entry.kind === 'video' && requiresVideoRemux(entry.format))
+    || (entry.kind === 'audio' && requiresEagerAudioCompatibility(entry.format));
 }
 
 // resumeReplacedPlayback 會在原始影片換成保存後的檔案時，接回原本的播放位置。
@@ -698,6 +825,7 @@ function drawAudioVisualization(
   waveformData: Uint8Array<ArrayBuffer>,
   idle: boolean,
   mode: AudioVisualizationMode,
+  colorsEnabled: boolean,
 ) {
   const context = canvas.getContext('2d');
   if (!context) {
@@ -735,14 +863,22 @@ function drawAudioVisualization(
     const gap = Math.max(1, Math.round(Math.max(2 * pixelRatio, width * 0.0025)));
     const barWidth = Math.max(1, Math.floor((width - gap * (barCount - 1)) / barCount));
     const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, analyser.context.sampleRate, analyser.fftSize, barCount, idle);
+    // Colors 開啟時讓柱狀頻譜的色相緩慢流動；關閉時維持固定綠色。
+    const colorPhase = performance.now() * 0.00035;
+    // 擴大至包含橘、黃、綠、青、藍與紫藍色系。
+    const hueShift = colorsEnabled ? Math.sin(colorPhase) * 105 : 0;
     const barGradient = context.createLinearGradient(0, height, 0, 0);
-    barGradient.addColorStop(0, 'rgba(63, 191, 139, 0.9)');
-    barGradient.addColorStop(0.55, 'rgba(111, 218, 174, 0.9)');
-    barGradient.addColorStop(1, 'rgba(205, 250, 226, 0.96)');
+    barGradient.addColorStop(0, `hsla(${150 + hueShift}, 55%, 48%, 0.9)`);
+    barGradient.addColorStop(0.55, `hsla(${164 + hueShift}, 58%, 64%, 0.9)`);
+    barGradient.addColorStop(1, `hsla(${145 + hueShift}, 70%, 88%, 0.96)`);
     context.fillStyle = barGradient;
     for (let index = 0; index < barCount; index += 1) {
       const amplitude = amplitudes[index];
-      const barHeight = Math.max(3 * pixelRatio, amplitude * height * 0.78);
+      // 不為零振幅補畫固定高度，避免把 FFT 噪聲底線誤認成高頻能量。
+      if (amplitude <= 0) {
+        continue;
+      }
+      const barHeight = Math.max(1 * pixelRatio, amplitude * height * 0.78);
       const x = index * (barWidth + gap);
       context.fillRect(x, height - barHeight, barWidth, barHeight);
     }

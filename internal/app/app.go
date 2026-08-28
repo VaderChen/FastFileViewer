@@ -176,12 +176,14 @@ var supportedArchiveExtensions = []string{
 
 // App 是圖庫服務：掃描、縮圖、文件讀取與可取消操作的進入點。
 type App struct {
-	ctx            context.Context
-	entries        *entryRegistry
-	operations     *operationRegistry
-	media          *MediaService
-	thumbnailOnce  sync.Once
-	libraryCacheMu sync.Mutex
+	ctx              context.Context
+	entries          *entryRegistry
+	operations       *operationRegistry
+	media            *MediaService
+	thumbnailOnce    sync.Once
+	libraryCacheMu   sync.Mutex
+	openFileMu       sync.Mutex
+	pendingOpenFiles []string
 }
 
 // Services 是綁定到前端的服務集合，各自持有自己的狀態與鎖。
@@ -222,6 +224,37 @@ func (s *Services) Shutdown() {
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.operations.adopt(ctx)
+}
+
+// QueueOpenFile 接收 macOS「以此 App 開啟」傳入的檔案。前端尚未 ready 時先排隊，
+// ready 後由 ConsumeOpenFilePaths 取出；App 已啟動時同時發送事件以立即更新畫面。
+func (a *App) QueueOpenFile(filePath string) {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return
+	}
+	a.openFileMu.Lock()
+	for _, pending := range a.pendingOpenFiles {
+		if pending == filePath {
+			a.openFileMu.Unlock()
+			return
+		}
+	}
+	a.pendingOpenFiles = append(a.pendingOpenFiles, filePath)
+	ctx := a.ctx
+	a.openFileMu.Unlock()
+	if ctx != nil {
+		wailsruntime.EventsEmit(ctx, "fastfileviewer:file-open", filePath)
+	}
+}
+
+// ConsumeOpenFilePaths 取出啟動期間累積的檔案開啟請求。
+func (a *App) ConsumeOpenFilePaths() []string {
+	a.openFileMu.Lock()
+	defer a.openFileMu.Unlock()
+	paths := append([]string(nil), a.pendingOpenFiles...)
+	a.pendingOpenFiles = nil
+	return paths
 }
 
 func (a *App) BeginOperation() int64 {

@@ -75,12 +75,12 @@ test('maps low-frequency music energy across logarithmic spectrum bars', () => {
   assert.ok(amplitudes.filter((value) => value > 0.08).length > 20);
 });
 
-test('covers logarithmic spectrum from 18 Hz through 24 kHz when available', () => {
+test('covers logarithmic spectrum from 10 Hz through 20 kHz when available', () => {
   const frequencyData = new Float32Array(16_384).fill(-90);
   const sampleRate = 48_000;
   const fftSize = 32_768;
   const binFrequency = sampleRate / fftSize;
-  const extendedHighStart = Math.floor(23_900 / binFrequency);
+  const extendedHighStart = Math.floor(19_900 / binFrequency);
   frequencyData.fill(-24, extendedHighStart);
   const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, sampleRate, fftSize, 72, false);
   assert.ok(amplitudes.slice(-4).some((value) => value > 0.08));
@@ -88,7 +88,8 @@ test('covers logarithmic spectrum from 18 Hz through 24 kHz when available', () 
 
 test('does not reuse the same resolved FFT bin across adjacent low-frequency bars', () => {
   const frequencyData = new Float32Array(16_384).fill(-90);
-  frequencyData[13] = -10;
+  // 10 Hz 的第一、第二個對數中心頻率落在第 7 個 FFT bin 附近。
+  frequencyData[7] = -10;
   const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, 48_000, 32_768, 72, false);
   assert.ok(amplitudes[0] > 0);
   assert.ok(amplitudes[1] > 0);
