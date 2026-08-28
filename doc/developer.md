@@ -50,6 +50,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `internal/app/download.go`：安全 URL 驗證、下載佇列、進度、持久化及 HLS VOD 合併。
 - `internal/app/types.go`：前後端資料模型。
 - `frontend/src/App.tsx`：內容樹、Viewer、工作區、設定與 About 授權資訊。
+- 文件配色預設為 `GitHub Light`，使用者選擇透過 `localStorage` 持久化。
 - `frontend/src/MediaPlayer.tsx`：影片與音訊播放、Web Audio 頻譜／波形、相容音訊 fallback、控制列及字幕掛載；音訊 BAR 的 `Colors` 狀態會控制是否以緩慢色相循環顯示。
 - `frontend/src/mediaSupport.ts`：sidecar 字幕配對與 WebVTT 轉換。
 - `frontend/src/useImageViewer.ts`、`frontend/src/imageLayout.ts`：圖片縮放、旋轉、置中、拖曳平移與版面計算。

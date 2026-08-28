@@ -1122,6 +1122,21 @@ export default function App() {
   }, [selectedImageId, visibleImages]);
 
   useEffect(() => {
+    if (!documentPayload && !pdfURL) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const stage = imageStageRef.current;
+      if (!stage) {
+        return;
+      }
+      stage.scrollLeft = 0;
+      stage.scrollTop = 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [documentPayload?.id, imageStageRef, pdfURL]);
+
+  useEffect(() => {
     setDocumentViewMode(selectedImageEntry && supportsDocumentPreview(selectedImageEntry.format) ? 'preview' : 'raw');
     setActiveChecksum('');
     setChecksumBusy(false);
@@ -1159,6 +1174,8 @@ export default function App() {
 
     if (selectedImageEntry && selectedImageEntry.kind !== 'image') {
       setImagePayload(null);
+      // 非同步載入新文件前先移除上一份內容，避免舊主題／預覽與新內容重疊顯示。
+      setDocumentPayload(null);
       setPdfURL(null);
       if (selectedImageEntry.kind === 'pdf') {
         void (async () => {
@@ -3694,7 +3711,7 @@ function resolveInitialDocumentTheme(): DocumentTheme {
   if (stored === 'github-dark' || stored === 'github-light' || stored === 'atom-one-dark' || stored === 'nord' || stored === 'monokai') {
     return stored;
   }
-  return 'github-dark';
+  return 'github-light';
 }
 
 function resolveInitialEnabledImageExtensions(): string[] {

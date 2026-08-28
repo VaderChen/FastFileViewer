@@ -16,6 +16,7 @@
 - Browse supported content inside ZIP, TAR, TGZ, and TAR.GZ archives without extracting them.
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
 - Render Markdown, syntax-highlight code, browse JSON trees, and search or sort CSV/TSV tables.
+- Documents use `GitHub Light` by default; other themes are available and the selection is remembered locally.
 - Play common video and music formats; choose spectrum bars, waveform, or both visualizations, with the selection remembered locally.
 - The `Colors` control slowly cycles spectrum BARs through orange, yellow, green, cyan, blue, and violet-blue; when disabled, BARs remain fixed green.
 - Keep music time, play/pause, volume, and mute state while browsing other images or documents; background music pauses when a video is selected.

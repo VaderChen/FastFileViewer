@@ -63,8 +63,21 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
   };
 
   useEffect(() => {
-    centerImage();
-  }, [fullscreen, imageId, naturalSize.height, naturalSize.width, rotation, viewerMode, zoom, zoomBehavior]);
+    window.requestAnimationFrame(() => {
+      const stage = stageRef.current;
+      if (!stage) {
+        return;
+      }
+      if (!panEnabled) {
+        // 文件、PDF 與媒體不使用圖片置中視角，開啟時固定從左上角開始。
+        stage.scrollLeft = 0;
+        stage.scrollTop = 0;
+        return;
+      }
+      stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
+      stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
+    });
+  }, [fullscreen, imageId, naturalSize.height, naturalSize.width, panEnabled, rotation, viewerMode, zoom, zoomBehavior]);
 
   // resetView 會在切換圖片時把視角回到預設；lockRatio 刻意保留使用者原本的縮放。
   const resetView = () => {
