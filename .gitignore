@@ -21,6 +21,7 @@ package-dmg.sh
 *.cer
 *.provisionprofile
 *.mobileprovision
+entitlements.plist
 
 # 建置與發行產物
 /build/bin/
