@@ -17,9 +17,10 @@
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
 - Render Markdown, syntax-highlight code, browse JSON trees, and search or sort CSV/TSV tables.
 - Play common video and music formats; choose spectrum bars, waveform, or both visualizations, with the selection remembered locally.
+- The `Colors` control slowly cycles spectrum BARs through orange, yellow, green, cyan, blue, and violet-blue; when disabled, BARs remain fixed green.
 - Keep music time, play/pause, volume, and mute state while browsing other images or documents; background music pauses when a video is selected.
 - Automatically advance to the next audio track after playback ends, skipping non-audio entries and wrapping through the current library order.
-- Spectrum bars use logarithmic centre-frequency interpolation over a 32768-point floating-decibel FFT and cover 18 Hz–24 kHz when the source sample rate permits.
+- Spectrum bars use logarithmic centre-frequency interpolation over a 32768-point floating-decibel FFT and cover 10 Hz–20 kHz when the source sample rate permits.
 - Audio support covers MP2/MP3, M4A/M4B/ALAC, WAV, AAC, FLAC, OGG/OPUS, AIFF, CAF, WMA, APE, WavPack, AC-3, AMR, and MKA.
 - FLAC uses native WebKit decoding first and automatically falls back to a temporary compatible M4A when native decoding fails.
 - Release apps bundle an LGPL FFmpeg build for automatic temporary MP4 remuxing or transcoding; development mode falls back to a local `ffmpeg` when no bundle is present.

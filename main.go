@@ -10,6 +10,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
@@ -19,13 +20,16 @@ func main() {
 	services := app.New()
 
 	err := wails.Run(&options.App{
-		Title:            "FastFileViewer",
-		Width:            1440,
-		Height:           920,
-		MinWidth:         960,
-		MinHeight:        560,
-		AssetServer:      &assetserver.Options{Assets: assets, Middleware: app.NewMediaMiddleware(services.Media)},
-		DragAndDrop:      &options.DragAndDrop{EnableFileDrop: true},
+		Title:       "FastFileViewer",
+		Width:       1440,
+		Height:      920,
+		MinWidth:    960,
+		MinHeight:   560,
+		AssetServer: &assetserver.Options{Assets: assets, Middleware: app.NewMediaMiddleware(services.Media)},
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
+		Mac: &mac.Options{
+			OnFileOpen: services.Library.QueueOpenFile,
+		},
 		BackgroundColour: &options.RGBA{R: 242, G: 244, B: 241, A: 1},
 		OnStartup:        services.Startup,
 		OnShutdown: func(context.Context) {

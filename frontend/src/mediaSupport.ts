@@ -33,8 +33,8 @@ export function calculateLogSpectrumAmplitudes(
     return Array.from({ length: barCount }, (_, index) => 0.025 + 0.018 * Math.sin(index * 0.55) ** 2);
   }
 
-  const minimumFrequency = 18;
-  const maximumFrequency = Math.max(minimumFrequency, Math.min(24_000, sampleRate / 2));
+  const minimumFrequency = 10;
+  const maximumFrequency = Math.max(minimumFrequency, Math.min(20_000, sampleRate / 2));
   const frequencyRatio = maximumFrequency / minimumFrequency;
   const binFrequency = sampleRate / fftSize;
   const rawAmplitudes = Array.from({ length: barCount }, (_, index) => {

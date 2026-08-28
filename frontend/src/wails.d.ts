@@ -12,6 +12,7 @@ declare global {
           CalculateChecksum: (entry: ImageEntry, operationId: number) => Promise<string>;
           FinishOperation: (operationId: number) => Promise<void>;
           GetAppInfo: () => Promise<AppInfo>;
+          ConsumeOpenFilePaths: () => Promise<string[]>;
           LoadLibraryCache: (rootPath: string) => Promise<string>;
           SaveLibraryCache: (rootPath: string, payload: string) => Promise<void>;
           SelectDirectory: (dialogTitle: string) => Promise<string>;
@@ -31,13 +32,7 @@ declare global {
           PrepareMediaByPath: (filePath: string, operationId: number) => Promise<string>;
           PrepareCompatibleMediaByPath: (filePath: string, operationId: number) => Promise<string>;
           ReleasePlaybackCache: (filePath: string) => Promise<void>;
-          ConfirmRemuxedOriginalCleanup: (
-            filePath: string,
-            title: string,
-            message: string,
-            confirmLabel: string,
-            cancelLabel: string,
-          ) => Promise<ImageEntry>;
+          ReplaceRemuxedOriginal: (filePath: string) => Promise<ImageEntry>;
           PrepareDocumentByPath: (filePath: string, operationId: number) => Promise<string>;
         };
         FileService?: {

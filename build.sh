@@ -277,6 +277,12 @@ xattr -cr "$STAGING_APP_PATH" 2>/dev/null || true
 
 if [[ -d "$STAGING_APP_PATH/Contents/Resources/bin" ]]; then
   NESTED_SIGNING_ARGUMENTS=(--force --sign "$CODESIGN_IDENTITY" --options runtime)
+  FFMPEG_ENTITLEMENTS_ARGUMENTS=()
+  if [[ -f "$STAGING_DIR/build/darwin/FFmpeg.entitlements.plist" ]]; then
+    FFMPEG_ENTITLEMENTS_ARGUMENTS=(--entitlements "$STAGING_DIR/build/darwin/FFmpeg.entitlements.plist")
+  else
+    echo "找不到選用的 FFmpeg entitlements，使用一般簽章流程..."
+  fi
   if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
     NESTED_SIGNING_ARGUMENTS+=(--timestamp)
   fi
@@ -285,7 +291,7 @@ if [[ -d "$STAGING_APP_PATH/Contents/Resources/bin" ]]; then
   done
   for nested_binary in "$STAGING_APP_PATH/Contents/Resources/bin/ffmpeg" "$STAGING_APP_PATH/Contents/Resources/bin/ffprobe"; do
     codesign "${NESTED_SIGNING_ARGUMENTS[@]}" \
-      --entitlements "$STAGING_DIR/build/darwin/FFmpeg.entitlements.plist" "$nested_binary"
+      "${FFMPEG_ENTITLEMENTS_ARGUMENTS[@]}" "$nested_binary"
   done
 fi
 
