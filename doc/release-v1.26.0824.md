@@ -28,6 +28,10 @@ FastFileViewer is now a local-first file, media, archive, and download workspace
 - Added automatic next-track playback that skips non-audio entries and wraps through the current library order.
 - Added a low-latency output gain stage so native mute changes silence playback immediately.
 
+### Document Themes
+
+- Set `GitHub Light` as the default document theme while preserving the user's locally saved theme selection.
+
 ### Security and Reliability
 
 - Rejects localhost, private, link-local, multicast, CGNAT, and reserved destinations before requests, after redirects, and during connection-time DNS resolution.
