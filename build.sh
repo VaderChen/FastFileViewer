@@ -257,6 +257,8 @@ fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUNDLE_VERSION" "$STAGING_APP_PATH/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $APP_BUNDLE_ID" "$STAGING_APP_PATH/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion 12.0" "$STAGING_APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :NSRemovableVolumesUsageDescription string FastFileViewer 需要讀取外接磁碟中的檔案。" "$STAGING_APP_PATH/Contents/Info.plist" 2>/dev/null ||
+  /usr/libexec/PlistBuddy -c "Set :NSRemovableVolumesUsageDescription FastFileViewer 需要讀取外接磁碟中的檔案。" "$STAGING_APP_PATH/Contents/Info.plist"
 
 APP_LICENSE_DIR="$STAGING_APP_PATH/Contents/Resources/Licenses"
 mkdir -p "$APP_LICENSE_DIR"

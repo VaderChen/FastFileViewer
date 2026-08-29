@@ -1492,9 +1492,11 @@ export default function App() {
       }
 
       const rootNode = firstResult.node;
-      setTree((current) => (current ? mergeScannedNode(current, rootNode) : rootNode));
-      setSelectedNodeId((current) => current || rootNode.id);
-      setExpandedNodeIds((current) => new Set(current.size > 0 ? current : [rootNode.id]));
+      // 根目錄變更時必須完整替換舊樹；只有同一根目錄的後續分批掃描才合併。
+      const sameRoot = tree?.id === rootNode.id;
+      setTree((current) => (current?.id === rootNode.id ? mergeScannedNode(current, rootNode) : rootNode));
+      setSelectedNodeId((current) => (sameRoot && current ? current : rootNode.id));
+      setExpandedNodeIds((current) => new Set(sameRoot && current.size > 0 ? current : [rootNode.id]));
       setRootPath(firstResult.rootPath);
       setScannedDirectories(1);
       if (firstResult.warnings?.length) {
