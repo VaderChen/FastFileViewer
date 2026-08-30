@@ -47,6 +47,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `main.go`：Wails 入口與視窗設定。
 - `internal/app/app.go`：掃描、壓縮檔、圖片／文件載入、快取、匯出與重複偵測。
 - `internal/app/media.go`：媒體註冊、Range 回應、壓縮檔媒體暫存與資產路由。
+- `internal/app/metadata.go`：圖片尺寸／EXIF、影音 ffprobe metadata，以及 macOS 原生 RAW 轉換預覽。
 - `internal/app/download.go`：安全 URL 驗證、下載佇列、進度、持久化及 HLS VOD 合併。
 - `internal/app/types.go`：前後端資料模型。
 - `frontend/src/App.tsx`：內容樹、Viewer、工作區、設定與 About 授權資訊。

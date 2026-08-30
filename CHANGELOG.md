@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Metadata and camera RAW support
+
+- Added on-demand FFmpeg metadata for video and audio streams, including duration, bitrate, codecs, dimensions, frame rate, sample rate, and channels.
+- Added image dimensions, colour model, and common EXIF fields such as camera, lens, capture time, exposure, ISO, focal length, and GPS.
+- Added common camera RAW extensions with macOS ImageIO／`sips` conversion for preview when the operating system supports the camera model.
+- Expanded RAW filename detection to additional vendor formats including CRW, SRW, ERF, MRW, GPR, R3D, FFF, BAY, CAP, PTX, and PXN.
+
 ## 1.26.1003-r2 — 2026-10-03
 
 ### Performance and memory

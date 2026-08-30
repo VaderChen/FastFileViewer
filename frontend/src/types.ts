@@ -56,6 +56,37 @@ export interface ImagePayload {
   location: string;
 }
 
+export interface ImageMetadata {
+  width: number;
+  height: number;
+  orientation?: string;
+  make?: string;
+  model?: string;
+  lensModel?: string;
+  dateTimeOriginal?: string;
+  exposureTime?: string;
+  fNumber?: string;
+  iso?: string;
+  focalLength?: string;
+  gps?: string;
+  colorModel?: string;
+}
+
+export interface MediaMetadata {
+  format?: string;
+  duration?: string;
+  bitRate?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  width?: number;
+  height?: number;
+  frameRate?: string;
+  pixelFormat?: string;
+  sampleRate?: string;
+  channels?: number;
+  channelLayout?: string;
+}
+
 export interface DocumentPayload {
   id: string;
   name: string;

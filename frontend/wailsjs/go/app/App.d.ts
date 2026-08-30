@@ -21,6 +21,8 @@ export function FinishOperation(arg1:number):Promise<void>;
 
 export function GetAppInfo():Promise<app.AppInfo>;
 
+export function GetImageMetadata(arg1:app.ImageEntry):Promise<app.ImageMetadata>;
+
 export function LoadDocumentByPath(arg1:string):Promise<app.DocumentPayload>;
 
 export function LoadImage(arg1:string):Promise<app.ImagePayload>;

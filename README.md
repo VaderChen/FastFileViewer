@@ -22,10 +22,13 @@
 - 從 Finder 或 macOS `open` 開啟檔案時，會先顯示指定檔案，再於背景完成所在目錄索引。
 - 不解壓縮直接瀏覽 ZIP、TAR、TGZ 與 TAR.GZ 內的支援內容。
 - 預覽 PNG、JPEG、GIF、WebP、BMP、SVG、TIFF 與 HEIC。
+- 支援各家常見相機 RAW 副檔名（DNG、CRW／CR2／CR3、NEF／NRW、ARW／SRF／SR2、RAF、ORF、RW2、PEF、SRW、ERF、MRW、GPR、R3D、FFF、3FR、IIQ、X3F 等）；預覽使用 macOS 原生 ImageIO 解碼，實際相容性依 macOS 支援的相機型號而定。
+- 選取圖片時顯示尺寸、色彩模型及常見 EXIF（相機、鏡頭、拍攝時間、曝光、ISO、焦段與 GPS）資訊。
 - 顯示 TXT、Markdown、JSON、CSV、TSV、常見設定檔與多種程式語言。
 - 提供 Markdown Render、程式碼語法高亮、JSON 樹及可搜尋排序的 CSV／TSV 表格。
 - 文件配色預設使用 `GitHub Light`；可切換其他主題，選擇會保存在本機。
 - 播放常見影片與音樂格式；音樂視覺化可選柱狀頻譜、波形或全部顯示，並記憶選擇。
+- 選取影片或音訊時顯示容器、長度、位元率、編碼、解析度、影格率、取樣率與聲道等影音 metadata。
 - 音樂視覺化提供 `Colors` 控制項；開啟後 BAR 會在橘、黃、綠、青、藍、紫藍色系間緩慢變色，關閉後維持固定綠色。
 - 瀏覽其他圖片或文件時，音樂會保留播放時間、播放／暫停、音量與靜音狀態；切換至影片時自動暫停背景音樂。
 - 音樂自然播完後會略過非音訊項目，自動跳到下一首並依目前清單順序循環播放。

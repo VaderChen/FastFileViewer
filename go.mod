@@ -3,6 +3,7 @@ module github.com/VaderChen/FastFileViewer
 go 1.26.6
 
 require (
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/wailsapp/wails/v2 v2.13.0
 	golang.org/x/image v0.45.0
 	golang.org/x/sys v0.47.0

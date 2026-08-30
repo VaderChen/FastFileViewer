@@ -44,7 +44,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { ClipboardSetText, EventsOn, WindowFullscreen, WindowIsFullscreen, WindowSetTitle, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
 import { isMediaKind, isPlaybackMediaKind } from './types';
-import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ZoomBehavior } from './types';
+import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImageMetadata, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, MediaMetadata, SettingsTab, StageBackground, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
 import { isLibraryTree, moveLibraryEntries, mergeScannedNodes, removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
@@ -67,7 +67,7 @@ import appIconURL from '../../assets/appicon.png';
 
 const fallbackBootstrap: BootstrapPayload = {
   defaultPath: '',
-  supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic'],
+  supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic', '.dng', '.crw', '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.orf', '.rw2', '.rwl', '.pef', '.dcr', '.kdc', '.3fr', '.iiq', '.mef', '.mos', '.x3f', '.raw', '.srw', '.erf', '.mrw', '.gpr', '.bay', '.cap', '.r3d', '.fff', '.ptx', '.pxn'],
   supportedDocuments: ['.pdf', '.txt', '.md', '.markdown'],
   supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.mp2', '.m4a', '.m4b', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.aif', '.aiff', '.aifc', '.caf', '.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
   supportedPacks: ['.zip', '.tar', '.tgz', '.tar.gz'],
@@ -166,6 +166,23 @@ const messages = {
     musicWaveform: '波形',
     musicVisualizationBoth: '全部顯示',
     noImage: '未選擇內容',
+    metadata: '檔案資訊',
+    dimensions: '尺寸',
+    colorModel: '色彩模型',
+    duration: '長度',
+    bitrate: '位元率',
+    videoCodec: '視訊編碼',
+    audioCodec: '音訊編碼',
+    frameRate: '影格率',
+    sampleRate: '取樣率',
+    channels: '聲道',
+    camera: '相機',
+    lens: '鏡頭',
+    capturedAt: '拍攝時間',
+    exposure: '曝光',
+    iso: 'ISO',
+    focalLength: '焦段',
+    gps: 'GPS',
     selectPathFirst: '請先選擇或輸入圖片目錄',
     operationFailed: '操作失敗',
     cancel: '取消',
@@ -356,6 +373,23 @@ const messages = {
     musicWaveform: 'Waveform',
     musicVisualizationBoth: 'Show both',
     noImage: 'No content selected',
+    metadata: 'File information',
+    dimensions: 'Dimensions',
+    colorModel: 'Color model',
+    duration: 'Duration',
+    bitrate: 'Bit rate',
+    videoCodec: 'Video codec',
+    audioCodec: 'Audio codec',
+    frameRate: 'Frame rate',
+    sampleRate: 'Sample rate',
+    channels: 'Channels',
+    camera: 'Camera',
+    lens: 'Lens',
+    capturedAt: 'Captured',
+    exposure: 'Exposure',
+    iso: 'ISO',
+    focalLength: 'Focal length',
+    gps: 'GPS',
     selectPathFirst: 'Choose or enter a folder first',
     operationFailed: 'Operation failed',
     cancel: 'Cancel',
@@ -546,6 +580,23 @@ const messages = {
     musicWaveform: '波形',
     musicVisualizationBoth: '両方表示',
     noImage: 'コンテンツ未選択',
+    metadata: 'ファイル情報',
+    dimensions: 'サイズ',
+    colorModel: '色空間',
+    duration: '長さ',
+    bitrate: 'ビットレート',
+    videoCodec: '映像コーデック',
+    audioCodec: '音声コーデック',
+    frameRate: 'フレームレート',
+    sampleRate: 'サンプルレート',
+    channels: 'チャンネル',
+    camera: 'カメラ',
+    lens: 'レンズ',
+    capturedAt: '撮影日時',
+    exposure: '露出',
+    iso: 'ISO',
+    focalLength: '焦点距離',
+    gps: 'GPS',
     selectPathFirst: '先にフォルダを選択または入力してください',
     operationFailed: '操作に失敗しました',
     cancel: 'キャンセル',
@@ -803,6 +854,9 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo>(fallbackAppInfo);
+  const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
+  const [mediaMetadata, setMediaMetadata] = useState<MediaMetadata | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
   const scanTokenRef = useRef(0);
   const scanOperationRef = useRef<number | null>(null);
   const checksumRequestRef = useRef<{ operationId: number; cancelled: boolean } | null>(null);
@@ -2215,6 +2269,41 @@ export default function App() {
   const totalDocuments = totals?.documents ?? 0;
   const totalMedia = totals?.media ?? 0;
   const totalArchives = totals?.archives ?? 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    setImageMetadata(null);
+    setMediaMetadata(null);
+    if (!activeImage || (activeImage.kind !== 'image' && !activeIsMedia)) {
+      setMetadataLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setMetadataLoading(true);
+    const request = activeImage.kind === 'image'
+      ? window.go?.app?.App?.GetImageMetadata?.(activeImage)
+      : window.go?.app?.MediaService?.GetMediaMetadata?.(activeImage);
+    void Promise.resolve(request)
+      .then((payload) => {
+        if (!cancelled && payload) {
+          if (activeImage.kind === 'image') {
+            setImageMetadata(payload as ImageMetadata);
+          } else {
+            setMediaMetadata(payload as MediaMetadata);
+          }
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setMetadataLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeImage?.id, activeImage?.kind, activeImage?.path]);
   // 原始影片移到垃圾桶後，用保存下來的新檔就地取代清單項目，不必重新掃描整個資料庫。
   const handleOriginalReplaced = (replacement: ImageEntry, replacedEntryId: string) => {
     setTree((current) => (current ? replaceLibraryEntry(current, replacedEntryId, replacement) : current));
@@ -2728,6 +2817,32 @@ export default function App() {
             <span>{activeImage ? formatBytes(activeImage.size) : ''}</span>
             <span>{activeImage ? `${selectedImageIndex + 1}/${visibleImages.length}` : ''}</span>
             <span>{activeImage ? activeImage.directoryPath : ''}</span>
+            {metadataLoading ? <span className="metadata-loading"><FontAwesomeIcon icon={faSpinner} spin /> {t.metadata}</span> : null}
+            {activeIsImage && imageMetadata ? (
+              <div className="metadata-summary" aria-label={t.metadata}>
+                {(imageMetadata.width > 0 && imageMetadata.height > 0) ? <span>{t.dimensions}: {imageMetadata.width} × {imageMetadata.height}</span> : null}
+                {imageMetadata.colorModel ? <span>{t.colorModel}: {imageMetadata.colorModel}</span> : null}
+                {imageMetadata.make || imageMetadata.model ? <span>{t.camera}: {[imageMetadata.make, imageMetadata.model].filter(Boolean).join(' ')}</span> : null}
+                {imageMetadata.lensModel ? <span>{t.lens}: {imageMetadata.lensModel}</span> : null}
+                {imageMetadata.dateTimeOriginal ? <span>{t.capturedAt}: {imageMetadata.dateTimeOriginal}</span> : null}
+                {imageMetadata.exposureTime || imageMetadata.fNumber ? <span>{t.exposure}: {[imageMetadata.exposureTime, imageMetadata.fNumber ? `ƒ/${imageMetadata.fNumber}` : ''].filter(Boolean).join(' · ')}</span> : null}
+                {imageMetadata.iso ? <span>{t.iso}: {imageMetadata.iso}</span> : null}
+                {imageMetadata.focalLength ? <span>{t.focalLength}: {imageMetadata.focalLength}</span> : null}
+                {imageMetadata.gps ? <span>{t.gps}: {imageMetadata.gps}</span> : null}
+              </div>
+            ) : null}
+            {activeIsMedia && mediaMetadata ? (
+              <div className="metadata-summary" aria-label={t.metadata}>
+                {(mediaMetadata.width && mediaMetadata.height) ? <span>{t.dimensions}: {mediaMetadata.width} × {mediaMetadata.height}</span> : null}
+                {mediaMetadata.duration ? <span>{t.duration}: {mediaMetadata.duration}</span> : null}
+                {mediaMetadata.bitRate ? <span>{t.bitrate}: {mediaMetadata.bitRate}</span> : null}
+                {mediaMetadata.videoCodec ? <span>{t.videoCodec}: {mediaMetadata.videoCodec}</span> : null}
+                {mediaMetadata.audioCodec ? <span>{t.audioCodec}: {mediaMetadata.audioCodec}</span> : null}
+                {mediaMetadata.frameRate ? <span>{t.frameRate}: {mediaMetadata.frameRate}</span> : null}
+                {mediaMetadata.sampleRate ? <span>{t.sampleRate}: {mediaMetadata.sampleRate}</span> : null}
+                {mediaMetadata.channels ? <span>{t.channels}: {mediaMetadata.channels}{mediaMetadata.channelLayout ? ` (${mediaMetadata.channelLayout})` : ''}</span> : null}
+              </div>
+            ) : null}
             <div className="checksum-meta">
               {activeChecksum ? (
                 <button type="button" title={t.copyChecksum} onClick={() => copyText(activeChecksum)}>{activeChecksum.slice(0, 14)}…</button>

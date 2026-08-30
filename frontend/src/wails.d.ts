@@ -1,4 +1,4 @@
-import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DownloadItem, DownloadResolution, DuplicateGroup, ExportResult, ImageEntry, ImagePayload, MoveResult, TrashResult } from './types';
+import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DownloadItem, DownloadResolution, DuplicateGroup, ExportResult, ImageEntry, ImageMetadata, ImagePayload, MediaMetadata, MoveResult, TrashResult } from './types';
 
 declare global {
   interface Window {
@@ -22,6 +22,7 @@ declare global {
           LoadImage: (id: string) => Promise<ImagePayload>;
           LoadImageByPath: (filePath: string) => Promise<ImagePayload>;
           LoadImageByPathWithOperation: (filePath: string, operationId: number) => Promise<ImagePayload>;
+          GetImageMetadata: (entry: ImageEntry) => Promise<ImageMetadata>;
           LoadDocumentByPath: (filePath: string) => Promise<DocumentPayload>;
           LoadThumbnailByPath: (filePath: string, maxDimension: number) => Promise<ImagePayload>;
           ExportImages: (images: ImageEntry[], dialogTitle: string, operationId: number) => Promise<ExportResult>;
@@ -30,6 +31,7 @@ declare global {
         };
         // MediaService 負責播放前的解壓、改封裝與播放快取。
         MediaService?: {
+          GetMediaMetadata: (entry: ImageEntry) => Promise<MediaMetadata>;
           PrepareMediaByPath: (filePath: string, operationId: number) => Promise<string>;
           PrepareCompatibleMediaByPath: (filePath: string, operationId: number) => Promise<string>;
           ReleasePlaybackCache: (filePath: string) => Promise<void>;

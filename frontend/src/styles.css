@@ -2174,8 +2174,9 @@ body.resizing-library {
   grid-row: 4;
   align-self: stretch;
   display: grid;
-  grid-template-rows: 22px;
-  height: 43px;
+  grid-template-rows: auto;
+  min-height: 43px;
+  height: auto;
   min-width: 0;
   padding: 10px 14px;
   border-top: 1px solid #cfd7d1;
@@ -2187,10 +2188,29 @@ body.resizing-library {
   grid-template-columns: minmax(160px, 0.28fr) 112px 78px 64px minmax(0, 1fr) 126px;
   align-items: center;
   gap: 14px;
-  height: 22px;
+  min-height: 22px;
   min-width: 0;
   overflow: hidden;
   font-size: 12px;
+}
+
+.metadata-loading {
+  color: #6d7c73;
+}
+
+.metadata-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-width: 0;
+  padding-top: 2px;
+  color: #506258;
+  font-size: 11px;
+}
+
+.metadata-summary span {
+  max-width: 260px;
 }
 
 .checksum-meta {

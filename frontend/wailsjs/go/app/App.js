@@ -38,6 +38,10 @@ export function GetAppInfo() {
   return window['go']['app']['App']['GetAppInfo']();
 }
 
+export function GetImageMetadata(arg1) {
+  return window['go']['app']['App']['GetImageMetadata'](arg1);
+}
+
 export function LoadDocumentByPath(arg1) {
   return window['go']['app']['App']['LoadDocumentByPath'](arg1);
 }

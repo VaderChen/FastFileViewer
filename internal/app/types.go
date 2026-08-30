@@ -46,6 +46,39 @@ type ImagePayload struct {
 	Location string `json:"location"`
 }
 
+// ImageMetadata contains lightweight image dimensions and commonly used EXIF fields.
+type ImageMetadata struct {
+	Width            int    `json:"width"`
+	Height           int    `json:"height"`
+	Orientation      string `json:"orientation,omitempty"`
+	Make             string `json:"make,omitempty"`
+	Model            string `json:"model,omitempty"`
+	LensModel        string `json:"lensModel,omitempty"`
+	DateTimeOriginal string `json:"dateTimeOriginal,omitempty"`
+	ExposureTime     string `json:"exposureTime,omitempty"`
+	FNumber          string `json:"fNumber,omitempty"`
+	ISO              string `json:"iso,omitempty"`
+	FocalLength      string `json:"focalLength,omitempty"`
+	GPS              string `json:"gps,omitempty"`
+	ColorModel       string `json:"colorModel,omitempty"`
+}
+
+// MediaMetadata contains stream and container information reported by ffprobe.
+type MediaMetadata struct {
+	Format        string `json:"format,omitempty"`
+	Duration      string `json:"duration,omitempty"`
+	BitRate       string `json:"bitRate,omitempty"`
+	VideoCodec    string `json:"videoCodec,omitempty"`
+	AudioCodec    string `json:"audioCodec,omitempty"`
+	Width         int    `json:"width,omitempty"`
+	Height        int    `json:"height,omitempty"`
+	FrameRate     string `json:"frameRate,omitempty"`
+	PixelFormat   string `json:"pixelFormat,omitempty"`
+	SampleRate    string `json:"sampleRate,omitempty"`
+	Channels      int    `json:"channels,omitempty"`
+	ChannelLayout string `json:"channelLayout,omitempty"`
+}
+
 type DocumentPayload struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`

@@ -21,6 +21,7 @@ See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003-r2.md)
 - Incrementally scan local folders into a unified tree of images, documents, source code, media, and subtitles.
 - Browse supported content inside ZIP, TAR, TGZ, and TAR.GZ archives without extracting them.
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
+- Preview common camera RAW files (DNG, CRW/CR2/CR3, NEF/NRW, ARW/SRF/SR2, RAF, ORF, RW2, PEF, SRW, ERF, MRW, GPR, R3D, FFF, 3FR, IIQ, and X3F) through macOS ImageIO when the camera model is supported by the operating system.
 - Render Markdown, syntax-highlight code, browse JSON trees, and search or sort CSV/TSV tables.
 - Documents use `GitHub Light` by default; other themes are available and the selection is remembered locally.
 - Play common video and music formats; choose spectrum bars, waveform, or both visualizations, with the selection remembered locally.

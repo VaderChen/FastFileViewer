@@ -70,6 +70,10 @@ var supportedImageExtensions = []string{
 	".tif",
 	".tiff",
 	".heic",
+	// 常見相機 RAW；macOS ImageIO 會依機型決定實際可解碼範圍。
+	".dng", ".crw", ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
+	".raf", ".orf", ".rw2", ".rwl", ".pef", ".dcr", ".kdc", ".3fr", ".iiq", ".mef", ".mos", ".x3f", ".raw",
+	".srw", ".erf", ".mrw", ".gpr", ".bay", ".cap", ".r3d", ".fff", ".ptx", ".pxn",
 }
 
 var supportedDocumentExtensions = []string{
@@ -845,7 +849,17 @@ func loadImagePayload(entry ImageEntry) (ImagePayload, error) {
 }
 
 func loadImagePayloadWithContext(operationCtx context.Context, entry ImageEntry) (ImagePayload, error) {
-	data, err := readEntryLimitedWithContext(operationCtx, entry, maxImageBytes)
+	var data []byte
+	var err error
+	if isRawImage(entry.Format) && entry.Source != "archive" {
+		// 直接交給 ImageIO 讀取來源，避免大型 RAW 被 maxImageBytes 截斷。
+		data, err = convertRawImageToPNG(operationCtx, entry, nil)
+	} else {
+		data, err = readEntryLimitedWithContext(operationCtx, entry, maxImageBytes)
+		if err == nil && isRawImage(entry.Format) {
+			data, err = convertRawImageToPNG(operationCtx, entry, data)
+		}
+	}
 	if err != nil {
 		return ImagePayload{}, err
 	}
@@ -863,6 +877,9 @@ func loadImagePayloadWithContext(operationCtx context.Context, entry ImageEntry)
 
 func imagePayloadFromData(entry ImageEntry, data []byte) ImagePayload {
 	mime := mimeByExtension(entry.Format)
+	if isRawImage(entry.Format) {
+		mime = "image/png"
+	}
 	location := entry.Path
 	if entry.Source == "archive" {
 		location = entry.ArchivePath + "::" + entry.InnerPath

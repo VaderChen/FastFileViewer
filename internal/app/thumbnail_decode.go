@@ -84,6 +84,21 @@ func renderThumbnailWithContext(ctx context.Context, entry ImageEntry, maxDimens
 	if err := checkOperation(ctx); err != nil {
 		return nil, err
 	}
+	if isRawImage(entry.Format) {
+		var rawData []byte
+		var err error
+		if entry.Source == "archive" {
+			rawData, err = readEntryLimitedWithContext(ctx, entry, maxImageBytes)
+			if err != nil {
+				return nil, err
+			}
+		}
+		converted, err := convertRawImageToPNG(ctx, entry, rawData)
+		if err != nil {
+			return nil, err
+		}
+		return renderThumbnailBytesWithContext(ctx, entry, converted, maxDimension)
+	}
 	if entry.Size > maxThumbnailInputBytes {
 		return nil, fmt.Errorf("%s 超過縮圖讀取上限", entry.Name)
 	}
@@ -118,6 +133,30 @@ func renderThumbnailWithContext(ctx context.Context, entry ImageEntry, maxDimens
 	if limited.N == 0 {
 		return nil, fmt.Errorf("%s 超過縮圖讀取上限", entry.Name)
 	}
+	return encodeThumbnailWithContext(ctx, decoded, maxDimension)
+}
+
+func renderThumbnailBytesWithContext(ctx context.Context, entry ImageEntry, data []byte, maxDimension int) ([]byte, error) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("無法產生 %s 縮圖: %w", entry.Name, err)
+	}
+	if err := validateImageDimensions(config.Width, config.Height); err != nil {
+		return nil, err
+	}
+	pixels := int64(config.Width) * int64(config.Height)
+	if err := thumbnailPixels.acquire(ctx, pixels); err != nil {
+		return nil, err
+	}
+	defer thumbnailPixels.release(pixels)
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("無法解碼 %s: %w", entry.Name, err)
+	}
+	return encodeThumbnailWithContext(ctx, decoded, maxDimension)
+}
+
+func encodeThumbnailWithContext(ctx context.Context, decoded image.Image, maxDimension int) ([]byte, error) {
 	bounds := decoded.Bounds()
 	width, height := scaledDimensions(bounds.Dx(), bounds.Dy(), maxDimension)
 	thumbnail := image.NewRGBA(image.Rect(0, 0, width, height))

@@ -19,6 +19,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 - `main.go`：建立服務集合、設定 Wails 視窗、註冊媒體 middleware 與服務 Bind。
 - `internal/app/app.go`：圖庫服務、目錄／壓縮檔掃描、圖片／文件讀取、快取、匯出及重複偵測。
 - `internal/app/media.go`：媒體服務、Range 回應、壓縮檔媒體暫存、`ffmpeg` 改封裝／轉碼及播放快取。
+- `internal/app/metadata.go`：圖片尺寸／EXIF、影音 ffprobe metadata，以及 macOS 原生 RAW 轉換預覽。
 - `internal/app/download.go`：下載服務、公開 URL 驗證、網頁中的 HLS 候選解析、VOD 合併、佇列與歷史紀錄。
 - `internal/app/registry.go`：跨服務共用的項目註冊表與可取消操作註冊表。
 - `internal/app/types.go`：Wails 前後端資料模型。
@@ -98,7 +99,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 
 ## Viewer 與媒體流程
 
-圖片 Viewer 支援 Fit、實際尺寸、放大、縮小、旋轉、拖曳平移與全螢幕。圖片顯示版面由 `imageLayout.ts` 計算，`useImageViewer.ts` 管理舞台尺寸、捲動位置與 pointer capture。
+圖片 Viewer 支援 Fit、實際尺寸、放大、縮小、旋轉、拖曳平移與全螢幕。圖片顯示版面由 `imageLayout.ts` 計算，`useImageViewer.ts` 管理舞台尺寸、捲動位置與 pointer capture。選取圖片時，`GetImageMetadata` 會以受限讀取取得尺寸、色彩模型及常見 EXIF 欄位。
 
 文件 Viewer 支援純文字、Markdown、程式碼、JSON、CSV 與 TSV。Markdown 的遠端 URL 與原始 HTML 不會載入或執行；大型 JSON、表格及程式碼也有顯示數量限制。
 
@@ -111,6 +112,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 5. WMA、APE、WavPack、獨立 ALAC、AC-3、AMR、MKA 等音訊由 `ffmpeg` 轉成暫存 M4A。
 6. FLAC 優先使用 WebKit 原生解碼，失敗時才建立相容 M4A。
 7. 同目錄同檔名的 VTT、SRT、ASS、SSA、SMI、文字型 SUB 會自動配對；必要時轉為 WebVTT。
+8. 選取影音時可呼叫 `MediaService.GetMediaMetadata`，由內建 `ffprobe` 讀取容器、串流編碼、解析度、長度、位元率、影格率、取樣率與聲道資訊。
 
 音樂播放器保留切換圖片／文件時的播放位置、播放狀態、音量及靜音狀態；切換影片時會暫停背景音樂。播放結束後會跳到目前內容順序中的下一個音訊項目，跳過非音訊項目並循環。視覺化使用 32768-point floating-decibel FFT、72 個對數中心頻率與最多 1,600 個波形點。
 

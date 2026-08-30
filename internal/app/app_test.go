@@ -80,6 +80,11 @@ func TestSeparateExtensionFilters(t *testing.T) {
 	if entryKind(".ts") != "code" {
 		t.Fatal("TypeScript extension was misclassified as media")
 	}
+	for _, extension := range []string{".dng", ".crw", ".cr3", ".nef", ".arw", ".raf", ".rw2", ".srw", ".erf", ".mrw", ".gpr", ".r3d", ".fff"} {
+		if !isSupportedImage(extension) || entryKind(extension) != "image" || !isRawImage(extension) {
+			t.Fatalf("RAW extension was not classified as image: %s", extension)
+		}
+	}
 }
 
 func TestDecodeUTF16Documents(t *testing.T) {
