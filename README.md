@@ -17,6 +17,7 @@
 ## 功能
 
 - 逐目錄掃描本機資料夾，建立圖片、文件、程式碼、影音與字幕的統一內容樹。
+- 從 Finder 或 macOS `open` 開啟檔案時，會先顯示指定檔案，再於背景完成所在目錄索引。
 - 不解壓縮直接瀏覽 ZIP、TAR、TGZ 與 TAR.GZ 內的支援內容。
 - 預覽 PNG、JPEG、GIF、WebP、BMP、SVG、TIFF 與 HEIC。
 - 顯示 TXT、Markdown、JSON、CSV、TSV、常見設定檔與多種程式語言。

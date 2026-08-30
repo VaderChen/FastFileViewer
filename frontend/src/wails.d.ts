@@ -13,6 +13,7 @@ declare global {
           FinishOperation: (operationId: number) => Promise<void>;
           GetAppInfo: () => Promise<AppInfo>;
           ConsumeOpenFilePaths: () => Promise<string[]>;
+          OpenFileByPath: (filePath: string) => Promise<ImageEntry>;
           LoadLibraryCache: (rootPath: string) => Promise<string>;
           SaveLibraryCache: (rootPath: string, payload: string) => Promise<void>;
           SelectDirectory: (dialogTitle: string) => Promise<string>;

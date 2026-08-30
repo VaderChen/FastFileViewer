@@ -681,6 +681,16 @@ func (a *App) LoadImage(id string) (ImagePayload, error) {
 	return loadImagePayload(entry)
 }
 
+// OpenFileByPath 只驗證並註冊系統傳入的檔案，避免必須先完成整個目錄掃描。
+func (a *App) OpenFileByPath(filePath string) (ImageEntry, error) {
+	entry, err := entryByPath(filePath)
+	if err != nil {
+		return ImageEntry{}, err
+	}
+	a.rememberImage(entry)
+	return entry, nil
+}
+
 func (a *App) LoadImageByPath(filePath string) (ImagePayload, error) {
 	return a.LoadImageByPathWithOperation(filePath, 0)
 }

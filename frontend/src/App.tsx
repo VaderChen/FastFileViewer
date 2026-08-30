@@ -147,6 +147,13 @@ const messages = {
     mediaUnmute: '取消靜音',
     mediaSubtitlesOn: '開啟字幕',
     mediaSubtitlesOff: '關閉字幕',
+    subtitleSettings: '字幕設定',
+    subtitleFont: '字體',
+    subtitleFontSize: '字體比例',
+    subtitleTextColor: '文字顏色',
+    subtitleBackground: '底色',
+    subtitleOpacity: '透明度',
+    subtitlePosition: '上下位置（底部間距）',
     mediaSeek: '播放進度',
     musicVisualizer: '音樂頻譜視覺化',
     musicColors: 'Colors',
@@ -330,6 +337,13 @@ const messages = {
     mediaUnmute: 'Unmute',
     mediaSubtitlesOn: 'Turn subtitles on',
     mediaSubtitlesOff: 'Turn subtitles off',
+    subtitleSettings: 'Subtitle settings',
+    subtitleFont: 'Font',
+    subtitleFontSize: 'Font scale',
+    subtitleTextColor: 'Text color',
+    subtitleBackground: 'Background',
+    subtitleOpacity: 'Opacity',
+    subtitlePosition: 'Vertical position (bottom offset)',
     mediaSeek: 'Playback position',
     musicVisualizer: 'Music spectrum visualizer',
     musicColors: 'Colors',
@@ -513,6 +527,13 @@ const messages = {
     mediaUnmute: 'ミュート解除',
     mediaSubtitlesOn: '字幕をオン',
     mediaSubtitlesOff: '字幕をオフ',
+    subtitleSettings: '字幕設定',
+    subtitleFont: 'フォント',
+    subtitleFontSize: '文字サイズ比率',
+    subtitleTextColor: '文字色',
+    subtitleBackground: '背景色',
+    subtitleOpacity: '透明度',
+    subtitlePosition: '上下位置（下端からの距離）',
     mediaSeek: '再生位置',
     musicVisualizer: '音楽スペクトラム表示',
     musicColors: 'Colors',
@@ -736,6 +757,7 @@ export default function App() {
   const locale = useMemo(() => resolveLocale(languagePreference), [languagePreference]);
   const [rootPath, setRootPath] = useState('');
   const [pendingOpenFilePath, setPendingOpenFilePath] = useState('');
+  const pendingOpenFilePathRef = useRef('');
   const [tree, setTree] = useState<LibraryNode | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
@@ -779,6 +801,12 @@ export default function App() {
   const imageLoadOperationRef = useRef<number | null>(null);
   const imagePrefetchOperationRef = useRef<number | null>(null);
   const cacheSaveTimerRef = useRef<number | null>(null);
+  const directOpenInFlightRef = useRef('');
+
+  const updatePendingOpenFilePath = (filePath: string) => {
+    pendingOpenFilePathRef.current = filePath;
+    setPendingOpenFilePath(filePath);
+  };
 
   const t = messages[locale];
   const pinnedDirectorySet = useMemo(() => new Set(pinnedDirectories), [pinnedDirectories]);
@@ -925,7 +953,7 @@ export default function App() {
           .then((paths) => {
             const latestPath = paths?.[paths.length - 1]?.trim();
             if (latestPath) {
-              setPendingOpenFilePath(latestPath);
+              updatePendingOpenFilePath(latestPath);
             }
           })
           .catch(() => undefined);
@@ -933,17 +961,24 @@ export default function App() {
     } catch {
       // 瀏覽器開發模式沒有 Wails runtime，忽略事件註冊即可。
     }
-    void Promise.resolve(window.go?.app?.App?.ConsumeOpenFilePaths?.())
-      .then((paths) => {
+    // 先取出啟動參數，再呼叫 Bootstrap；避免還原上一個大型目錄快取搶在
+    // 系統指定檔案之前執行。
+    void (async () => {
+      try {
+        const paths = await window.go?.app?.App?.ConsumeOpenFilePaths?.();
         const latestPath = paths?.[paths.length - 1]?.trim();
         if (latestPath) {
-          setPendingOpenFilePath(latestPath);
+          updatePendingOpenFilePath(latestPath);
         }
-      })
-      .catch(() => undefined);
-
-    void window.go?.app?.App?.Bootstrap?.()
+      } catch {
+        // 瀏覽器開發模式沒有 Wails runtime，忽略即可。
+      }
+      return window.go?.app?.App?.Bootstrap?.();
+    })()
       .then(async (payload) => {
+        if (!payload) {
+          return;
+        }
         const supportedMedia = payload.supportedMedia?.length ? payload.supportedMedia : fallbackBootstrap.supportedMedia;
         const storedDocuments = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, payload.supportedDocuments);
         const storedMedia = readStoredEnabledExtensions(storageKeys.enabledMediaExtensions, supportedMedia);
@@ -953,10 +988,13 @@ export default function App() {
         setBootstrapReady(true);
         setDocumentFormatsReady(true);
         setMediaFormatsReady(true);
-        const persistedRootPath = readPersistedRootPath();
-        const initialRootPath = persistedRootPath || payload.defaultPath;
+        // 系統傳入檔案時優先處理該檔案，不要先還原上次目錄／快取，
+        // 否則大型目錄快取會阻塞開檔畫面數秒。
+        const pendingPath = pendingOpenFilePathRef.current.trim();
+        const persistedRootPath = pendingPath ? '' : readPersistedRootPath();
+        const initialRootPath = pendingPath ? directoryPathForFile(pendingPath) : (persistedRootPath || payload.defaultPath);
         setRootPath(initialRootPath);
-        if (persistedRootPath) {
+        if (persistedRootPath && !pendingPath) {
           const cache = await readLibraryCache(persistedRootPath);
           if (cache) {
             applyLibraryCache(cache);
@@ -1453,7 +1491,7 @@ export default function App() {
     setPendingDirectories(0);
   };
 
-  const handleScan = async (targetPath = rootPath) => {
+  const handleScan = async (targetPath = rootPath, preserveCurrentSelection = false) => {
     const trimmedPath = targetPath.trim();
     if (!trimmedPath) {
       setErrorMessage(t.selectPathFirst);
@@ -1472,9 +1510,9 @@ export default function App() {
     setRootPath(trimmedPath);
 
     const cache = await readLibraryCache(trimmedPath);
-    if (cache) {
+    if (cache && !preserveCurrentSelection) {
       applyLibraryCache(cache);
-    } else {
+    } else if (!preserveCurrentSelection) {
       setSelectedImageId('');
       setTree(null);
       setSelectedNodeId('');
@@ -1495,7 +1533,7 @@ export default function App() {
       // 根目錄變更時必須完整替換舊樹；只有同一根目錄的後續分批掃描才合併。
       const sameRoot = tree?.id === rootNode.id;
       setTree((current) => (current?.id === rootNode.id ? mergeScannedNode(current, rootNode) : rootNode));
-      setSelectedNodeId((current) => (sameRoot && current ? current : rootNode.id));
+      setSelectedNodeId(rootNode.id);
       setExpandedNodeIds((current) => new Set(sameRoot && current.size > 0 ? current : [rootNode.id]));
       setRootPath(firstResult.rootPath);
       setScannedDirectories(1);
@@ -1503,7 +1541,9 @@ export default function App() {
         setErrorMessage(firstResult.warnings.join('\n'));
       }
 
+      const scanTargetPath = pendingOpenFilePath.trim();
       const queue = rootNode.children.filter((child) => child.kind === 'directory').map((child) => child.path);
+      prioritizeScanQueue(queue, scanTargetPath);
       setPendingDirectories(queue.length);
 
       while (queue.length > 0) {
@@ -1528,6 +1568,7 @@ export default function App() {
           }
           const childDirectories = scannedNode.children.filter((child) => child.kind === 'directory').map((child) => child.path);
           queue.push(...childDirectories);
+          prioritizeScanQueue(queue, scanTargetPath);
           setPendingDirectories(queue.length);
           await yieldToUI();
         } catch (error) {
@@ -1560,32 +1601,62 @@ export default function App() {
   // macOS 以此 App 開啟檔案時，掃描檔案所在資料夾後選取該檔案。
   useEffect(() => {
     const requestedPath = pendingOpenFilePath.trim();
-    if (!requestedPath || !bootstrapReady) {
+    // 直接開檔只需要路徑驗證，不必等待 Bootstrap／目錄掃描完成。
+    // 這條路徑讓 Finder 傳入的文件能在 WebView ready 後立即顯示。
+    if (!requestedPath) {
       return;
     }
     const directoryPath = directoryPathForFile(requestedPath);
     const sameDirectory = normalizeFilePath(rootPath) === normalizeFilePath(directoryPath);
     if (!sameDirectory || !tree) {
-      if (!scanning) {
+      if (!scanning && directOpenInFlightRef.current !== requestedPath) {
+        directOpenInFlightRef.current = requestedPath;
         setLibrarySourceTab('current');
         setRootPath(directoryPath);
-        void handleScan(directoryPath);
+        void (async () => {
+          try {
+            const directEntry = await window.go?.app?.App?.OpenFileByPath?.(requestedPath);
+            if (!directEntry) {
+              void handleScan(directoryPath);
+              return;
+            }
+            const directNode = createDirectOpenNode(directEntry);
+            setTree(directNode);
+            setSelectedNodeId(directNode.id);
+            setExpandedNodeIds(new Set([directNode.id]));
+            setSelectedImageId(directEntry.id);
+            setSelectedImageIds(new Set([directEntry.id]));
+            setSelectionAnchorId(directEntry.id);
+            updatePendingOpenFilePath('');
+            // 先讓 WebView 完成目標文件的第一幀，再啟動完整目錄掃描。
+            window.setTimeout(() => {
+              void handleScan(directoryPath, true);
+            }, 0);
+          } catch {
+            updatePendingOpenFilePath('');
+            void handleScan(directoryPath);
+          } finally {
+            if (directOpenInFlightRef.current === requestedPath) {
+              directOpenInFlightRef.current = '';
+            }
+          }
+        })();
       }
+      return;
+    }
+    const target = navigationImages.find((item) => normalizeFilePath(item.image.path) === normalizeFilePath(requestedPath));
+    if (target) {
+      setSelectedNodeId(target.node.id);
+      setSelectedImageId(target.image.id);
+      setSelectedImageIds(new Set([target.image.id]));
+      setSelectionAnchorId(target.image.id);
+      updatePendingOpenFilePath('');
       return;
     }
     if (scanning) {
       return;
     }
-    const target = navigationImages.find((item) => normalizeFilePath(item.image.path) === normalizeFilePath(requestedPath));
-    if (!target) {
-      setPendingOpenFilePath('');
-      return;
-    }
-    setSelectedNodeId(target.node.id);
-    setSelectedImageId(target.image.id);
-    setSelectedImageIds(new Set([target.image.id]));
-    setSelectionAnchorId(target.image.id);
-    setPendingOpenFilePath('');
+    updatePendingOpenFilePath('');
   }, [bootstrapReady, handleScan, navigationImages, pendingOpenFilePath, rootPath, scanning, tree]);
 
   const moveSelection = (offset: number) => {
@@ -2112,6 +2183,13 @@ export default function App() {
     subtitlesOn: t.mediaSubtitlesOn,
     subtitlesOff: t.mediaSubtitlesOff,
     fullscreen: t.fullscreen,
+    subtitleSettings: t.subtitleSettings,
+    subtitleFont: t.subtitleFont,
+    subtitleFontSize: t.subtitleFontSize,
+    subtitleTextColor: t.subtitleTextColor,
+    subtitleBackground: t.subtitleBackground,
+    subtitleOpacity: t.subtitleOpacity,
+    subtitlePosition: t.subtitlePosition,
     seek: t.mediaSeek,
     visualizer: t.musicVisualizer,
     colors: t.musicColors,
@@ -3642,6 +3720,37 @@ function normalizeFilePath(filePath: string): string {
     return normalized.replace(/\/$/, '');
   }
   return normalized;
+}
+
+function prioritizeScanQueue(queue: string[], targetPath: string) {
+  const normalizedTarget = normalizeFilePath(targetPath);
+  if (!normalizedTarget) {
+    return;
+  }
+  queue.sort((left, right) => {
+    const leftPriority = isPathWithin(normalizedTarget, left) ? 0 : 1;
+    const rightPriority = isPathWithin(normalizedTarget, right) ? 0 : 1;
+    return leftPriority - rightPriority;
+  });
+}
+
+function isPathWithin(filePath: string, directoryPath: string): boolean {
+  const normalizedDirectory = normalizeFilePath(directoryPath);
+  return filePath === normalizedDirectory || filePath.startsWith(`${normalizedDirectory}/`);
+}
+
+function createDirectOpenNode(entry: ImageEntry): LibraryNode {
+  const directoryPath = normalizeFilePath(entry.directoryPath || directoryPathForFile(entry.path));
+  const name = directoryPath.split('/').filter(Boolean).pop() || directoryPath;
+  return {
+    id: `direct-open:${directoryPath}`,
+    name,
+    path: directoryPath,
+    kind: 'directory',
+    scanned: false,
+    images: [entry],
+    children: [],
+  };
 }
 
 function directoryPathForFile(filePath: string): string {

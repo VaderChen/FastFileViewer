@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.26.0830
+
+### System file opening and startup performance
+
+- Added a fast path for files opened by Finder or the macOS `open` command: the requested file is registered and displayed before the complete directory scan begins.
+- Preserved the selected file while the containing directory is indexed in the background, including directories on external volumes.
+- Avoided restoring a previous library cache before handling a system-open request, preventing large cached trees from delaying the first document frame.
+- Added command-line argument handling for direct launches so cold starts and existing App instances use the same file-open path.
+
 ## 1.26.0825
 
 ### Architecture and playback workflow
