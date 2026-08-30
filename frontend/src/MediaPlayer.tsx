@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImageEntry } from './types';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faClosedCaptioning, faSliders } from '@fortawesome/free-solid-svg-icons';
 import {
   audioSpectrumMaximumDecibels,
   audioSpectrumMinimumDecibels,
   calculateLogSpectrumAmplitudes,
   convertSubtitleToWebVTT,
   sidecarSubtitlePaths,
-  subtitleLanguageFromName,
 } from './mediaSupport';
 
 interface MediaPlayerLabels {
@@ -33,6 +34,13 @@ interface MediaPlayerLabels {
   subtitlesOn: string;
   subtitlesOff: string;
   fullscreen: string;
+  subtitleSettings: string;
+  subtitleFont: string;
+  subtitleFontSize: string;
+  subtitleTextColor: string;
+  subtitleBackground: string;
+  subtitleOpacity: string;
+  subtitlePosition: string;
   seek: string;
   visualizer: string;
   colors: string;
@@ -68,6 +76,19 @@ interface AudioGraph {
 
 type AudioVisualizationMode = 'spectrum' | 'waveform' | 'both';
 type ConversionDialogState = { phase: 'confirm' | 'progress'; name: string };
+interface SubtitlePresentation {
+  bottomOffset: number;
+  textColor: string;
+  background: string;
+  opacity: number;
+  font: string;
+  fontScale: number;
+}
+interface SubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
 
 const audioGraphs = new WeakMap<HTMLAudioElement, AudioGraph>();
 const audioVisualizationStorageKey = 'fastfileviewer.audioVisualizationMode';
@@ -91,7 +112,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   const controlsHideTimerRef = useRef<number | null>(null);
   const [mediaURL, setMediaURL] = useState('');
   const [subtitleURL, setSubtitleURL] = useState('');
-  const [subtitleTrackName, setSubtitleTrackName] = useState('');
+  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [error, setError] = useState('');
   const [subtitleError, setSubtitleError] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -100,6 +121,13 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [subtitleSettingsOpen, setSubtitleSettingsOpen] = useState(false);
+  const [subtitleFont, setSubtitleFont] = useState(() => localStorage.getItem('fastfileviewer.subtitleFont') || 'system-ui');
+  const [subtitleFontScale, setSubtitleFontScale] = useState(() => readSubtitleNumber('fastfileviewer.subtitleFontScale', 50, 50, 300));
+  const [subtitleTextColor, setSubtitleTextColor] = useState(() => localStorage.getItem('fastfileviewer.subtitleTextColor') || '#ffffff');
+  const [subtitleBackground, setSubtitleBackground] = useState(() => localStorage.getItem('fastfileviewer.subtitleBackground') || '#000000');
+  const [subtitleOpacity, setSubtitleOpacity] = useState(() => readSubtitleNumber('fastfileviewer.subtitleOpacity', 0.2, 0, 1));
+  const [subtitlePosition, setSubtitlePosition] = useState(() => readStoredNumber('fastfileviewer.subtitlePosition', 5, 0, 40));
   const [audioVisualizationMode, setAudioVisualizationMode] = useState<AudioVisualizationMode>(resolveInitialAudioVisualizationMode);
   const [colorsEnabled, setColorsEnabled] = useState(() => localStorage.getItem('fastfileviewer.audioVisualizerColors') === 'true');
   const [conversionDialog, setConversionDialog] = useState<ConversionDialogState | null>(null);
@@ -162,6 +190,15 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   useEffect(() => {
     localStorage.setItem(audioVisualizationStorageKey, audioVisualizationMode);
   }, [audioVisualizationMode]);
+
+  useEffect(() => {
+    localStorage.setItem('fastfileviewer.subtitleFont', subtitleFont);
+    localStorage.setItem('fastfileviewer.subtitleFontScale', String(subtitleFontScale));
+    localStorage.setItem('fastfileviewer.subtitleTextColor', subtitleTextColor);
+    localStorage.setItem('fastfileviewer.subtitleBackground', subtitleBackground);
+    localStorage.setItem('fastfileviewer.subtitleOpacity', String(subtitleOpacity));
+    localStorage.setItem('fastfileviewer.subtitlePosition', String(subtitlePosition));
+  }, [subtitleBackground, subtitleFont, subtitleFontScale, subtitleOpacity, subtitlePosition, subtitleTextColor]);
 
   useEffect(() => {
     localStorage.setItem('fastfileviewer.audioVisualizerColors', String(colorsEnabled));
@@ -394,7 +431,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     let cancelled = false;
     let objectURL = '';
     setSubtitleURL('');
-    setSubtitleTrackName('');
+    setSubtitleCues([]);
     setSubtitleError('');
     if (entry.kind !== 'video') {
       return () => undefined;
@@ -411,8 +448,16 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
           if (!payload) continue;
           const webVTT = convertSubtitleToWebVTT(payload.text, payload.format);
           if (!webVTT) continue;
-          objectURL = URL.createObjectURL(new Blob([webVTT], { type: 'text/vtt;charset=utf-8' }));
-          setSubtitleTrackName(payload.name || subtitle?.name || subtitlePath.split(/[\\/]/).pop() || 'subtitle.vtt');
+          const styledWebVTT = applySubtitlePresentation(webVTT, {
+            bottomOffset: subtitlePosition,
+            textColor: subtitleTextColor,
+            background: subtitleBackground,
+            opacity: subtitleOpacity,
+            font: subtitleFont,
+            fontScale: subtitleFontScale,
+          });
+          objectURL = URL.createObjectURL(new Blob([styledWebVTT], { type: 'text/vtt;charset=utf-8' }));
+          setSubtitleCues(parseWebVTTCues(webVTT));
           setSubtitleURL(objectURL);
           return;
         } catch {
@@ -428,14 +473,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
         URL.revokeObjectURL(objectURL);
       }
     };
-  }, [entry.kind, entry.path, labels.subtitleFailed, subtitle]);
-
-  useEffect(() => {
-    const textTrack = videoRef.current?.textTracks[0];
-    if (textTrack) {
-      textTrack.mode = subtitlesEnabled ? 'showing' : 'disabled';
-    }
-  }, [subtitleURL, subtitlesEnabled]);
+  }, [entry.kind, entry.path, labels.subtitleFailed, subtitle, subtitleBackground, subtitleFont, subtitleFontScale, subtitleOpacity, subtitlePosition, subtitleTextColor]);
 
   const togglePlayback = async () => {
     const video = videoRef.current;
@@ -467,22 +505,6 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
       return;
     }
     video.muted = !video.muted;
-  };
-
-  const enterFullscreen = async () => {
-    const video = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
-    if (!video) {
-      return;
-    }
-    if (document.fullscreenElement) {
-      await document.exitFullscreen().catch(() => undefined);
-      return;
-    }
-    if (videoFrameRef.current?.requestFullscreen) {
-      await videoFrameRef.current.requestFullscreen().catch(() => undefined);
-      return;
-    }
-    video.webkitEnterFullscreen?.();
   };
 
   const conversionDialogView = conversionDialog ? (
@@ -531,6 +553,10 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     return <div className="media-player-status">{labels.loading}{conversionDialogView}{remuxCleanupDialogView}</div>;
   }
 
+  const visibleSubtitleCues = subtitlesEnabled
+    ? subtitleCues.filter((cue) => currentTime >= cue.start && currentTime < cue.end)
+    : [];
+
   return (
     <div className={`media-player ${entry.kind}`}>
       {conversionDialogView}
@@ -541,6 +567,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
           className={`video-player-frame ${fullscreen && !controlsVisible ? 'controls-hidden' : ''}`}
           onPointerMove={revealControls}
         >
+          <style>{`.video-player-frame video::cue { color: ${subtitleTextColor} !important; background: ${hexToRgba(subtitleBackground, subtitleOpacity)} !important; background-color: ${hexToRgba(subtitleBackground, subtitleOpacity)} !important; font-family: ${subtitleFont} !important; font-size: ${subtitleFontScale}% !important; }`}</style>
           <video
             ref={videoRef}
             key={mediaURL}
@@ -572,20 +599,20 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
             onError={() => setError(labels.playbackFailed)}
           >
             <source src={mediaURL} />
-            {subtitleURL ? (
-              <track
-                key={subtitleURL}
-                kind="subtitles"
-                src={subtitleURL}
-                srcLang={subtitleLanguageFromName(subtitleTrackName)}
-                label={subtitleTrackName}
-                default
-                onLoad={(event) => {
-                  event.currentTarget.track.mode = subtitlesEnabled ? 'showing' : 'disabled';
-                }}
-              />
-            ) : null}
           </video>
+          {visibleSubtitleCues.length > 0 ? (
+            <div className="subtitle-overlay" aria-live="off">
+              <div className="subtitle-overlay-content" style={{
+                bottom: `${subtitlePosition}%`,
+                color: subtitleTextColor,
+                backgroundColor: hexToRgba(subtitleBackground, subtitleOpacity),
+                fontFamily: subtitleFont,
+                fontSize: `clamp(12px, ${subtitleFontScale * 0.05}vh, 120px)`,
+              }}>
+                {visibleSubtitleCues.map((cue, index) => <div key={`${cue.start}-${cue.end}-${index}`}>{cue.text}</div>)}
+              </div>
+            </div>
+          ) : null}
           <div className="custom-video-controls" onDoubleClick={(event) => event.stopPropagation()}>
             <button type="button" title={playing ? labels.pause : labels.play} aria-label={playing ? labels.pause : labels.play} onClick={() => void togglePlayback()}>
               <span aria-hidden="true">{playing ? '❚❚' : '▶'}</span>
@@ -631,7 +658,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
             />
             {subtitleURL ? (
               <button
-                className={subtitlesEnabled ? 'active' : ''}
+                className={`cc-toggle ${subtitlesEnabled ? 'active' : ''}`}
                 type="button"
                 title={subtitlesEnabled ? labels.subtitlesOff : labels.subtitlesOn}
                 aria-label={subtitlesEnabled ? labels.subtitlesOff : labels.subtitlesOn}
@@ -640,9 +667,52 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
                 CC
               </button>
             ) : null}
-            <button type="button" title={labels.fullscreen} aria-label={labels.fullscreen} onClick={() => void enterFullscreen()}>
-              <span aria-hidden="true">⛶</span>
-            </button>
+            {subtitleURL ? (
+              <button
+                className={subtitleSettingsOpen ? 'active' : ''}
+                type="button"
+                title={labels.subtitleSettings}
+                aria-label={labels.subtitleSettings}
+                aria-expanded={subtitleSettingsOpen}
+                onClick={() => setSubtitleSettingsOpen((current) => !current)}
+              >
+                <FontAwesomeIcon icon={faSliders} aria-hidden="true" />
+              </button>
+            ) : null}
+            {subtitleSettingsOpen && subtitleURL ? (
+              <div className="subtitle-settings-popover" role="dialog" aria-label={labels.subtitleSettings} onMouseDown={(event) => event.stopPropagation()}>
+                <strong><FontAwesomeIcon icon={faClosedCaptioning} /> {labels.subtitleSettings}</strong>
+                <label>
+                  <span>{labels.subtitleFont}</span>
+                  <select value={subtitleFont} onChange={(event) => setSubtitleFont(event.target.value)}>
+                    <option value="system-ui">System</option>
+                    <option value="sans-serif">Sans Serif</option>
+                    <option value="serif">Serif</option>
+                    <option value="monospace">Monospace</option>
+                  </select>
+                </label>
+                <label>
+                  <span>{labels.subtitleFontSize} <output>{subtitleFontScale}%</output></span>
+                  <input type="range" min="50" max="300" step="5" value={subtitleFontScale} onChange={(event) => setSubtitleFontScale(Number(event.target.value))} />
+                </label>
+                <label className="subtitle-color-field">
+                  <span>{labels.subtitleTextColor}</span>
+                  <input type="color" value={subtitleTextColor} onChange={(event) => setSubtitleTextColor(event.target.value)} />
+                </label>
+                <label className="subtitle-color-field">
+                  <span>{labels.subtitleBackground}</span>
+                  <input type="color" value={subtitleBackground} onChange={(event) => setSubtitleBackground(event.target.value)} />
+                </label>
+                <label>
+                  <span>{labels.subtitleOpacity} <output>{Math.round(subtitleOpacity * 100)}%</output></span>
+                  <input type="range" min="0" max="1" step="0.05" value={subtitleOpacity} onChange={(event) => setSubtitleOpacity(Number(event.target.value))} />
+                </label>
+                <label>
+                  <span>{labels.subtitlePosition} <output>{subtitlePosition}%</output></span>
+                  <input type="range" min="0" max="40" step="1" value={subtitlePosition} onChange={(event) => setSubtitlePosition(Number(event.target.value))} />
+                </label>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : entry.kind === 'audio' && mediaURL ? (
@@ -811,6 +881,105 @@ function resumeReplacedPlayback(
 
 function requiresEagerAudioCompatibility(format: string): boolean {
   return ['.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka'].includes(format.toLowerCase());
+}
+
+function hexToRgba(hex: string, opacity: number): string {
+  const normalized = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : '000000';
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${Math.min(1, Math.max(0, opacity))})`;
+}
+
+// 將字幕底部間距轉成 WebVTT cue 的 line 百分比；保留字幕原有的定位設定。
+function applySubtitlePosition(webVTT: string, bottomOffset: number): string {
+  const linePosition = Math.min(95, Math.max(55, 95 - bottomOffset));
+  return webVTT.split('\n').map((line) => {
+    if (!line.includes('-->')) {
+      return line;
+    }
+    const timingAndSettings = line.split(/\s+/).slice(2);
+    if (timingAndSettings.some((setting) => /^(line|position|align):/i.test(setting))) {
+      return line;
+    }
+    return `${line} line:${linePosition}% position:50% align:center`;
+  }).join('\n');
+}
+
+// 將樣式寫入 VTT STYLE 區塊，確保 WebKit 不會套用內建的半透明字幕底色。
+function applySubtitlePresentation(webVTT: string, presentation: SubtitlePresentation): string {
+  const positioned = applySubtitlePosition(webVTT, presentation.bottomOffset);
+  const cueBackground = hexToRgba(presentation.background, presentation.opacity);
+  const supportedFonts = new Set(['system-ui', 'sans-serif', 'serif', 'monospace']);
+  const font = supportedFonts.has(presentation.font) ? presentation.font : 'system-ui';
+  const cueStyle = [
+    'STYLE',
+    '::cue {',
+    `  color: ${presentation.textColor};`,
+    `  background: ${cueBackground};`,
+    `  background-color: ${cueBackground};`,
+    `  font-family: ${font};`,
+    `  font-size: ${presentation.fontScale}%;`,
+    '}',
+  ].join('\n');
+  const content = positioned.replace(/^WEBVTT(?:\n+|$)/i, '');
+  return `WEBVTT\n\n${cueStyle}\n\n${content}`;
+}
+
+function parseWebVTTCues(webVTT: string): SubtitleCue[] {
+  return webVTT.split(/\n{2,}/).flatMap((block): SubtitleCue[] => {
+    const lines = block.split('\n');
+    const timingIndex = lines.findIndex((line) => line.includes('-->'));
+    if (timingIndex < 0) {
+      return [];
+    }
+    const timing = lines[timingIndex].match(/(\d{2}:\d{2}:\d{2}\.\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}\.\d{3})/);
+    if (!timing) {
+      return [];
+    }
+    const text = lines.slice(timingIndex + 1).join('\n').trim();
+    if (!text) {
+      return [];
+    }
+    return [{
+      start: parseWebVTTTime(timing[1]),
+      end: parseWebVTTTime(timing[2]),
+      text: decodeSubtitleText(text),
+    }];
+  });
+}
+
+function parseWebVTTTime(value: string): number {
+  const parts = value.split(':');
+  const seconds = Number(parts.pop() ?? 0);
+  const minutes = Number(parts.pop() ?? 0);
+  const hours = Number(parts.pop() ?? 0);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function decodeSubtitleText(value: string): string {
+  return value
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/<[^>]*>/g, '');
+}
+
+function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number): number {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value >= minimum && value <= maximum ? value : fallback;
+}
+
+function readSubtitleNumber(key: string, fallback: number, minimum: number, maximum: number): number {
+  // 將尚未調整過的舊版預設（100%、72%）一次更新為新的預設值，已自訂的設定則保留。
+  const oldScale = Number(localStorage.getItem('fastfileviewer.subtitleFontScale'));
+  const oldOpacity = Number(localStorage.getItem('fastfileviewer.subtitleOpacity'));
+  if (oldScale === 100 && oldOpacity === 0.72) {
+    return fallback;
+  }
+  return readStoredNumber(key, fallback, minimum, maximum);
 }
 
 function resolveInitialAudioVisualizationMode(): AudioVisualizationMode {

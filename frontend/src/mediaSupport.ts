@@ -160,19 +160,44 @@ export function subtitleLanguageFromName(name: string): string {
 
 function convertSRT(text: string): string | null {
   const cues: string[] = [];
-  for (const block of text.split(/\n{2,}/)) {
-    const lines = block.split('\n');
-    const timingIndex = lines.findIndex((line) => line.includes('-->'));
-    if (timingIndex < 0) {
+  const lines = text.split('\n');
+  const timingPattern = /^\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{3})\s+-->\s+(\d{1,2}:\d{2}:\d{2}[,.]\d{3})\s*$/;
+  for (let index = 0; index < lines.length;) {
+    const timingMatch = lines[index].match(timingPattern);
+    if (!timingMatch) {
+      index += 1;
       continue;
     }
-    const timing = lines[timingIndex].replace(/(\d{1,2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-    const cueText = escapeVTTText(lines.slice(timingIndex + 1).join('\n').trim());
-    if (cueText) {
-      cues.push(`${timing}\n${cueText}`);
+    const start = srtTimeToMilliseconds(timingMatch[1]);
+    const end = srtTimeToMilliseconds(timingMatch[2]);
+    let nextIndex = index + 1;
+    const cueLines: string[] = [];
+    while (nextIndex < lines.length && lines[nextIndex].trim() !== '' && !timingPattern.test(lines[nextIndex])) {
+      cueLines.push(lines[nextIndex]);
+      nextIndex += 1;
     }
+    const cueText = escapeVTTText(cueLines.join('\n').trim());
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start && cueText) {
+      cues.push(`${millisecondsToVTT(start)} --> ${millisecondsToVTT(end)}\n${cueText}`);
+    }
+    index = nextIndex;
   }
   return buildVTT(cues);
+}
+
+function srtTimeToMilliseconds(value: string): number {
+  const match = value.trim().replace(',', '.').match(/^(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})$/);
+  if (!match) {
+    return Number.NaN;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const milliseconds = Number(match[4]);
+  if (minutes > 59 || seconds > 59) {
+    return Number.NaN;
+  }
+  return ((hours * 60 + minutes) * 60 + seconds) * 1000 + milliseconds;
 }
 
 function convertASS(text: string): string | null {

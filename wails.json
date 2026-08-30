@@ -7,7 +7,7 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "info": {
-    "productVersion": "1.26.0825",
+    "productVersion": "1.26.0830",
     "fileAssociations": [
       { "ext": "png", "name": "PNG image", "description": "PNG image", "iconName": "appicon", "role": "Viewer" },
       { "ext": "jpg", "name": "JPEG image", "description": "JPEG image", "iconName": "appicon", "role": "Viewer" },

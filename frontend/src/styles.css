@@ -1513,6 +1513,7 @@ body.resizing-library {
 }
 
 .video-player-frame {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   width: 100%;
@@ -1546,11 +1547,59 @@ body.resizing-library {
 
 .video-player-frame video::cue {
   color: #ffffff;
-  background: rgba(0, 0, 0, 0.72);
+  background: transparent;
+  background-color: transparent;
   font-size: 1.05rem;
 }
 
+/* macOS WebKit 會另外建立字幕顯示圖層；一併清除其預設的黑色底框。 */
+.video-player-frame video::-webkit-media-text-track-display {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.video-player-frame video::-webkit-media-text-track-display-backdrop {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.video-player-frame video::-webkit-media-text-track-display-cue {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.subtitle-overlay {
+  position: absolute;
+  inset: 0 0 48px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.video-player-frame.controls-hidden .subtitle-overlay {
+  bottom: 0;
+}
+
+.subtitle-overlay-content {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  width: max-content;
+  max-width: 94%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  padding: 0.16em 0.34em;
+  border-radius: 0.22em;
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+}
+
 .custom-video-controls {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1574,6 +1623,10 @@ body.resizing-library {
   pointer-events: none;
 }
 
+.video-player-frame:has(.subtitle-settings-popover) .custom-video-controls {
+  overflow: visible;
+}
+
 .custom-video-controls button {
   flex: 0 0 auto;
   min-width: 34px;
@@ -1593,6 +1646,84 @@ body.resizing-library {
   border-color: #4b5651;
   background: #29302d;
   outline: none;
+}
+
+.custom-video-controls button.cc-toggle.active {
+  color: #effff7;
+  border-color: #8ae8bd;
+  background: #29302d;
+  box-shadow:
+    0 0 0 2px rgba(104, 226, 164, 0.18),
+    0 0 14px rgba(104, 226, 164, 0.42);
+}
+
+.subtitle-settings-popover {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+  width: 248px;
+  padding: 14px;
+  color: #e4ece7;
+  border: 1px solid #4b5651;
+  border-radius: 9px;
+  background: rgba(18, 24, 21, 0.97);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+}
+
+.subtitle-settings-popover strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f2f8f4;
+  font-size: 12px;
+}
+
+.subtitle-settings-popover label {
+  display: grid;
+  gap: 5px;
+  color: #b8c8bf;
+  font-size: 11px;
+}
+
+.subtitle-settings-popover label > span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.subtitle-settings-popover output {
+  color: #e5f5eb;
+}
+
+.subtitle-settings-popover select {
+  height: 30px;
+  padding: 0 8px;
+  color: #e4ece7;
+  border: 1px solid #4b5651;
+  border-radius: 5px;
+  background: #202824;
+}
+
+.subtitle-settings-popover input[type='range'] {
+  width: 100%;
+  accent-color: #7eb69f;
+}
+
+.subtitle-color-field {
+  grid-template-columns: 1fr auto !important;
+  align-items: center;
+}
+
+.subtitle-color-field input[type='color'] {
+  width: 34px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid #4b5651;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
 }
 
 .video-time {

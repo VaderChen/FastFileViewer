@@ -17,14 +17,14 @@ GitHub 公開來源只包含可重現建置所需的原始碼、通用腳本、�
 ## 建立版本
 
 ```bash
-git tag -a v1.26.0825 -m "FastFileViewer v1.26.0825"
+git tag -a v1.26.0830 -m "FastFileViewer v1.26.0830"
 git push origin main --tags
 ```
 
 建議讓 tag 指向乾淨工作樹，再執行：
 
 ```bash
-APP_MARKETING_VERSION=1.26.0825 ./build.sh
+APP_MARKETING_VERSION=1.26.0830 ./build.sh
 ```
 
 ## Release Notes 建議
