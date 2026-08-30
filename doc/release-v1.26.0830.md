@@ -7,6 +7,13 @@ FastFileViewer 1.26.0830 improves the startup path used when opening a file from
 - Previous library cache restoration no longer blocks a system-open request.
 - Direct launch arguments and macOS file-open events now share the same handling path.
 
+## Subtitle adjustments
+
+- Automatically detects and loads a same-name sidecar subtitle when playing supported video and audio files.
+- Supports SRT and WebVTT subtitle files, including basic SRT validation and safe line-break normalization.
+- Added a custom subtitle settings panel for font family, display-proportional font size, text colour, background colour, background opacity, and vertical position.
+- Subtitle rendering uses a custom overlay with adjustable edge highlighting and content-width background, so a 0% background opacity does not leave the player's built-in translucent box behind.
+
 ## Compatibility
 
 - Apple Silicon Mac
