@@ -22,6 +22,7 @@ See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003-r2.md)
 - Browse supported content inside ZIP, TAR, TGZ, and TAR.GZ archives without extracting them.
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
 - Preview common camera RAW files (DNG, CRW/CR2/CR3, NEF/NRW, ARW/SRF/SR2, RAF, ORF, RW2, PEF, SRW, ERF, MRW, GPR, R3D, FFF, 3FR, IIQ, and X3F) through macOS ImageIO when the camera model is supported by the operating system.
+- Finder-associated files use category icons distinct from the App icon; documents, images, media/subtitles, and archives are separated. Choose a built-in style at build time with `FASTFILEVIEWER_FILE_ICON_STYLE=classic|monochrome|vivid ./build.command`.
 - Render Markdown, syntax-highlight code, browse JSON trees, and search or sort CSV/TSV tables.
 - Documents use `GitHub Light` by default; other themes are available and the selection is remembered locally.
 - Play common video and music formats; choose spectrum bars, waveform, or both visualizations, with the selection remembered locally.
@@ -37,7 +38,7 @@ See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003-r2.md)
 - Paste or drop a public HTTP/HTTPS URL into Downloads to fetch images, videos, articles, and regular files; directly accessible video pages resolve `.m3u8` URLs from HTML and inline scripts.
 - A single embedded `.m3u8` starts automatically; multiple candidates open a multi-select dialog and create one download per selection.
 - Download unencrypted, completed `.m3u8` VOD playlists; master playlists select and merge the highest-bandwidth variant.
-- Configure image, document, and media/subtitle scan formats independently.
+- Configure image, document, programming-language, and media/subtitle scan formats independently.
 - Use a three-pane workspace with persistent pinned folders, batch loading, and cancellable operations.
 - Export selections across folders and archives, calculate SHA-256, and detect byte-identical duplicates.
 - Persist library indexes, thumbnails, and adjacent-image caches locally without a network service.

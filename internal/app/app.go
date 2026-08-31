@@ -81,6 +81,24 @@ var supportedDocumentExtensions = []string{
 	".txt",
 	".md",
 	".markdown",
+	".json",
+	".jsonc",
+	".xml",
+	".yaml",
+	".yml",
+	".toml",
+	".ini",
+	".conf",
+	".config",
+	".env",
+	".properties",
+	".lock",
+	".log",
+	".csv",
+	".tsv",
+}
+
+var supportedCodeExtensions = []string{
 	".go",
 	".rs",
 	".c",
@@ -112,17 +130,6 @@ var supportedDocumentExtensions = []string{
 	".scss",
 	".sass",
 	".less",
-	".json",
-	".jsonc",
-	".xml",
-	".yaml",
-	".yml",
-	".toml",
-	".ini",
-	".conf",
-	".config",
-	".env",
-	".properties",
 	".sql",
 	".graphql",
 	".gql",
@@ -155,10 +162,6 @@ var supportedDocumentExtensions = []string{
 	".dockerfile",
 	".makefile",
 	".gradle",
-	".lock",
-	".log",
-	".csv",
-	".tsv",
 }
 
 var supportedMediaExtensions = []string{
@@ -283,6 +286,7 @@ func (a *App) Bootstrap() BootstrapPayload {
 		DefaultPath:        home,
 		SupportedImages:    append([]string{}, supportedImageExtensions...),
 		SupportedDocuments: append([]string{}, supportedDocumentExtensions...),
+		SupportedCode:      append([]string{}, supportedCodeExtensions...),
 		SupportedMedia:     append([]string{}, supportedMediaExtensions...),
 		SupportedPacks:     append([]string{}, supportedArchiveExtensions...),
 	}
@@ -630,7 +634,8 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 		return DirectoryScanResult{}, errors.New("請先選擇目錄")
 	}
 	imageExtensionFilter := newExtensionFilter(enabledImageExtensions, supportedImageExtensions)
-	documentExtensionFilter := newExtensionFilter(enabledDocumentExtensions, supportedDocumentExtensions)
+	allDocumentExtensions := append(append([]string{}, supportedDocumentExtensions...), supportedCodeExtensions...)
+	documentExtensionFilter := newExtensionFilter(enabledDocumentExtensions, allDocumentExtensions)
 	mediaExtensionFilter := newExtensionFilter(enabledMediaExtensions, supportedMediaExtensions)
 
 	absPath, err := filepath.Abs(directoryPath)
@@ -1644,7 +1649,8 @@ func isVideoExtension(extension string) bool {
 }
 
 func isSupportedDocument(extension string) bool {
-	for _, supported := range supportedDocumentExtensions {
+	allDocumentExtensions := append(append([]string{}, supportedDocumentExtensions...), supportedCodeExtensions...)
+	for _, supported := range allDocumentExtensions {
 		if extension == supported {
 			return true
 		}

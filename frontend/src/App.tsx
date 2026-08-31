@@ -68,7 +68,8 @@ import appIconURL from '../../assets/appicon.png';
 const fallbackBootstrap: BootstrapPayload = {
   defaultPath: '',
   supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic', '.dng', '.crw', '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.orf', '.rw2', '.rwl', '.pef', '.dcr', '.kdc', '.3fr', '.iiq', '.mef', '.mos', '.x3f', '.raw', '.srw', '.erf', '.mrw', '.gpr', '.bay', '.cap', '.r3d', '.fff', '.ptx', '.pxn'],
-  supportedDocuments: ['.pdf', '.txt', '.md', '.markdown'],
+  supportedDocuments: ['.pdf', '.txt', '.md', '.markdown', '.json', '.jsonc', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.config', '.env', '.properties', '.lock', '.log', '.csv', '.tsv'],
+  supportedCode: ['.go', '.rs', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.cs', '.java', '.kt', '.kts', '.swift', '.m', '.mm', '.py', '.pyw', '.rb', '.php', '.js', '.jsx', '.ts', '.tsx', '.vue', '.svelte', '.html', '.htm', '.css', '.scss', '.sass', '.less', '.sql', '.graphql', '.gql', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd', '.lua', '.pl', '.r', '.dart', '.ex', '.exs', '.erl', '.hrl', '.fs', '.fsx', '.vb', '.scala', '.clj', '.cljs', '.hs', '.lhs', '.sol', '.asm', '.s', '.dockerfile', '.makefile', '.gradle'],
   supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.mp2', '.m4a', '.m4b', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.aif', '.aiff', '.aifc', '.caf', '.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
   supportedPacks: ['.zip', '.tar', '.tgz', '.tar.gz'],
 };
@@ -265,6 +266,7 @@ const messages = {
     formats: '檔案格式',
     imageFormats: '影像檔案',
     documentFormats: '文件檔案',
+    codeFormats: '程式語言',
     mediaFormats: '媒體與字幕',
     clearAll: '全不選',
     about: '關於',
@@ -472,6 +474,7 @@ const messages = {
     formats: 'File Formats',
     imageFormats: 'Images',
     documentFormats: 'Documents',
+    codeFormats: 'Programming languages',
     mediaFormats: 'Media & Subtitles',
     clearAll: 'Clear all',
     about: 'About',
@@ -679,6 +682,7 @@ const messages = {
     formats: 'ファイル形式',
     imageFormats: '画像ファイル',
     documentFormats: '文書ファイル',
+    codeFormats: 'プログラミング言語',
     mediaFormats: 'メディア・字幕',
     clearAll: 'すべて解除',
     about: '情報',
@@ -760,6 +764,7 @@ const storageKeys = {
   documentTheme: 'fastfileviewer.documentTheme',
   enabledImageExtensions: 'fastfileviewer.enabledImageExtensions',
   enabledDocumentExtensions: 'fastfileviewer.enabledDocumentExtensions.v2',
+  enabledCodeExtensions: 'fastfileviewer.enabledCodeExtensions.v1',
   enabledMediaExtensions: 'fastfileviewer.enabledMediaExtensions.v1',
   rootPath: 'fastfileviewer.rootPath',
   libraryCache: 'fastfileviewer.libraryCache.v3',
@@ -803,6 +808,7 @@ export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload>(fallbackBootstrap);
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const [documentFormatsReady, setDocumentFormatsReady] = useState(false);
+  const [codeFormatsReady, setCodeFormatsReady] = useState(false);
   const [mediaFormatsReady, setMediaFormatsReady] = useState(false);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => resolveInitialLanguagePreference());
   const [stageBackground, setStageBackground] = useState<StageBackground>(() => resolveInitialStageBackground());
@@ -810,6 +816,7 @@ export default function App() {
   const [documentTheme, setDocumentTheme] = useState<DocumentTheme>(() => resolveInitialDocumentTheme());
   const [enabledImageExtensions, setEnabledImageExtensions] = useState<string[]>(() => resolveInitialEnabledImageExtensions());
   const [enabledDocumentExtensions, setEnabledDocumentExtensions] = useState<string[]>(() => resolveInitialEnabledDocumentExtensions());
+  const [enabledCodeExtensions, setEnabledCodeExtensions] = useState<string[]>(() => resolveInitialEnabledCodeExtensions());
   const [enabledMediaExtensions, setEnabledMediaExtensions] = useState<string[]>(() => resolveInitialEnabledMediaExtensions());
   const locale = useMemo(() => resolveLocale(languagePreference), [languagePreference]);
   const [rootPath, setRootPath] = useState('');
@@ -996,6 +1003,13 @@ export default function App() {
   }, [documentFormatsReady, enabledDocumentExtensions]);
 
   useEffect(() => {
+    if (!codeFormatsReady) {
+      return;
+    }
+    localStorage.setItem(storageKeys.enabledCodeExtensions, JSON.stringify(enabledCodeExtensions));
+  }, [codeFormatsReady, enabledCodeExtensions]);
+
+  useEffect(() => {
     if (!mediaFormatsReady) {
       return;
     }
@@ -1056,13 +1070,18 @@ export default function App() {
           return;
         }
         const supportedMedia = payload.supportedMedia?.length ? payload.supportedMedia : fallbackBootstrap.supportedMedia;
-        const storedDocuments = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, payload.supportedDocuments);
+        const supportedCode = payload.supportedCode?.length ? payload.supportedCode : fallbackBootstrap.supportedCode;
+        const allDocumentExtensions = [...payload.supportedDocuments, ...supportedCode];
+        const storedDocuments = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, allDocumentExtensions);
+        const storedCode = readStoredEnabledExtensions(storageKeys.enabledCodeExtensions, supportedCode);
         const storedMedia = readStoredEnabledExtensions(storageKeys.enabledMediaExtensions, supportedMedia);
-        setBootstrap({ ...payload, supportedMedia });
-        setEnabledDocumentExtensions(storedDocuments ?? [...payload.supportedDocuments]);
+        setBootstrap({ ...payload, supportedCode, supportedMedia });
+        setEnabledDocumentExtensions((storedDocuments ?? allDocumentExtensions).filter((extension) => payload.supportedDocuments.includes(extension)));
+        setEnabledCodeExtensions(storedCode ?? storedDocuments?.filter((extension) => supportedCode.includes(extension)) ?? [...supportedCode]);
         setEnabledMediaExtensions(storedMedia ?? [...supportedMedia]);
         setBootstrapReady(true);
         setDocumentFormatsReady(true);
+        setCodeFormatsReady(true);
         setMediaFormatsReady(true);
         // 系統傳入檔案時優先處理該檔案，不要先還原上次目錄／快取，
         // 否則大型目錄快取會阻塞開檔畫面數秒。
@@ -1599,7 +1618,7 @@ export default function App() {
       libraryResetRef.current = reset.catch(() => undefined);
       await reset;
       if (scanTokenRef.current !== token) return;
-      const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, enabledDocumentExtensions, enabledMediaExtensions, operationId);
+      const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, [...enabledDocumentExtensions, ...enabledCodeExtensions], enabledMediaExtensions, operationId);
       if (!firstResult?.node || scanTokenRef.current !== token) {
         return;
       }
@@ -1646,7 +1665,7 @@ export default function App() {
         }
 
         try {
-          const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, enabledDocumentExtensions, enabledMediaExtensions, operationId);
+          const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, [...enabledDocumentExtensions, ...enabledCodeExtensions], enabledMediaExtensions, operationId);
           if (!result?.node || scanTokenRef.current !== token) {
             return;
           }
@@ -2121,6 +2140,16 @@ export default function App() {
         return current.filter((item) => item !== normalized);
       }
       return normalizeEnabledExtensions([...current, normalized], bootstrap.supportedDocuments);
+    });
+  };
+
+  const toggleCodeExtension = (extension: string) => {
+    setEnabledCodeExtensions((current) => {
+      const normalized = normalizeExtension(extension);
+      if (current.includes(normalized)) {
+        return current.filter((item) => item !== normalized);
+      }
+      return normalizeEnabledExtensions([...current, normalized], bootstrap.supportedCode);
     });
   };
 
@@ -3138,6 +3167,9 @@ export default function App() {
               <button className={`settings-tab ${settingsTab === 'documentFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('documentFormats')}>
                 {t.documentFormats}
               </button>
+              <button className={`settings-tab ${settingsTab === 'codeFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('codeFormats')}>
+                {t.codeFormats}
+              </button>
               <button className={`settings-tab ${settingsTab === 'mediaFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('mediaFormats')}>
                 {t.mediaFormats}
               </button>
@@ -3217,6 +3249,28 @@ export default function App() {
                           type="checkbox"
                           checked={enabledDocumentExtensions.includes(extension)}
                           onChange={() => toggleDocumentExtension(extension)}
+                        />
+                        <span>{extension}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : settingsTab === 'codeFormats' ? (
+                <div className="settings-stack">
+                  <div className="settings-format-header">
+                    <span>{t.codeFormats}</span>
+                    <div className="settings-format-actions">
+                      <button className="settings-link-button" type="button" onClick={() => setEnabledCodeExtensions([])}>{t.clearAll}</button>
+                      <button className="settings-link-button" type="button" onClick={() => setEnabledCodeExtensions([...bootstrap.supportedCode])}>{t.selectAll}</button>
+                    </div>
+                  </div>
+                  <div className="format-grid document-formats">
+                    {bootstrap.supportedCode.map((extension) => (
+                      <label className="format-option" key={extension}>
+                        <input
+                          type="checkbox"
+                          checked={enabledCodeExtensions.includes(extension)}
+                          onChange={() => toggleCodeExtension(extension)}
                         />
                         <span>{extension}</span>
                       </label>
@@ -3923,7 +3977,18 @@ function resolveInitialEnabledImageExtensions(): string[] {
 }
 
 function resolveInitialEnabledDocumentExtensions(): string[] {
-  return readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, fallbackBootstrap.supportedDocuments) ?? [];
+  const stored = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, [...fallbackBootstrap.supportedDocuments, ...fallbackBootstrap.supportedCode]);
+  return stored?.filter((extension) => fallbackBootstrap.supportedDocuments.includes(extension)) ?? [...fallbackBootstrap.supportedDocuments];
+}
+
+function resolveInitialEnabledCodeExtensions(): string[] {
+  const storedCode = readStoredEnabledExtensions(storageKeys.enabledCodeExtensions, fallbackBootstrap.supportedCode);
+  if (storedCode) {
+    return storedCode;
+  }
+  // 舊版 v2 設定把程式語言放在文件清單，升級時沿用其勾選結果。
+  const legacy = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, [...fallbackBootstrap.supportedDocuments, ...fallbackBootstrap.supportedCode]);
+  return legacy?.filter((extension) => fallbackBootstrap.supportedCode.includes(extension)) ?? [...fallbackBootstrap.supportedCode];
 }
 
 function resolveInitialEnabledMediaExtensions(): string[] {

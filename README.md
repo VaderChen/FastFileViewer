@@ -23,6 +23,7 @@
 - 不解壓縮直接瀏覽 ZIP、TAR、TGZ 與 TAR.GZ 內的支援內容。
 - 預覽 PNG、JPEG、GIF、WebP、BMP、SVG、TIFF 與 HEIC。
 - 支援各家常見相機 RAW 副檔名（DNG、CRW／CR2／CR3、NEF／NRW、ARW／SRF／SR2、RAF、ORF、RW2、PEF、SRW、ERF、MRW、GPR、R3D、FFF、3FR、IIQ、X3F 等）；預覽使用 macOS 原生 ImageIO 解碼，實際相容性依 macOS 支援的相機型號而定。
+- Finder 關聯檔案會使用與 App 不同的分類圖示；文件、圖片、媒體／字幕及壓縮檔分開顯示。建置時可用 `FASTFILEVIEWER_FILE_ICON_STYLE=classic|monochrome|vivid ./build.command` 選擇預設樣式。
 - 選取圖片時顯示尺寸、色彩模型及常見 EXIF（相機、鏡頭、拍攝時間、曝光、ISO、焦段與 GPS）資訊。
 - 顯示 TXT、Markdown、JSON、CSV、TSV、常見設定檔與多種程式語言。
 - 提供 Markdown Render、程式碼語法高亮、JSON 樹及可搜尋排序的 CSV／TSV 表格。
@@ -41,7 +42,7 @@
 - 在「下載項目」貼上或拖入公開 HTTP/HTTPS 網址，自動下載圖片、影片、文章與一般檔案；可直接存取的影片頁會解析 HTML／內嵌腳本中的 `.m3u8`。
 - 影片頁只有一個 `.m3u8` 時自動下載；找到多個時顯示複選對話框，每個選項建立獨立下載項目。
 - 支援未加密、已結束的 `.m3u8` VOD；主播放清單會選擇最高頻寬版本並合併媒體片段。
-- 可分別設定要掃描的圖片、文件與影音／字幕格式。
+- 可分別設定要掃描的圖片、文件、程式語言與影音／字幕格式。
 - 三區式內容工作區、持久化釘選目錄、批次載入及可取消作業。
 - 跨資料夾與壓縮檔多選匯出、SHA-256 檢查及完全重複檔案偵測。
 - 目錄索引、縮圖及相鄰圖片快取均保存在本機，不需網路服務。

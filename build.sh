@@ -8,6 +8,8 @@ APP_NAME="FastFileViewer"
 APP_OUTPUT_DIR="${APP_OUTPUT_DIR:-$SCRIPT_DIR/dist}"
 APP_PATH="$APP_OUTPUT_DIR/$APP_NAME.app"
 APP_ICON_SOURCE="$SCRIPT_DIR/assets/appicon.png"
+FILE_ICON_STYLE="${FASTFILEVIEWER_FILE_ICON_STYLE:-classic}"
+FILE_ICON_STYLES_DIR="$SCRIPT_DIR/assets/file-icons"
 FFMPEG_BIN_DIR="${FASTFILEVIEWER_FFMPEG_BIN_DIR:-$SCRIPT_DIR/third_party/ffmpeg/bin}"
 
 BUILD_APP_PATH="$SCRIPT_DIR/build/bin/$APP_NAME.app"
@@ -48,6 +50,11 @@ if [[ ! "$APP_BUNDLE_ID" =~ '^[A-Za-z0-9-]+([.][A-Za-z0-9-]+)+$' ]]; then
 fi
 if [[ ! -s "$APP_ICON_SOURCE" ]]; then
   echo "找不到 App 圖示：$APP_ICON_SOURCE"
+  exit 1
+fi
+if [[ ! "$FILE_ICON_STYLE" =~ '^[A-Za-z0-9_-]+$' || ! -d "$FILE_ICON_STYLES_DIR/$FILE_ICON_STYLE" ]]; then
+  echo "找不到檔案關聯圖示樣式：$FILE_ICON_STYLE"
+  echo "可用樣式：$(find "$FILE_ICON_STYLES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | tr '\n' ' ')"
   exit 1
 fi
 
@@ -217,6 +224,9 @@ node "$SCRIPT_DIR/scripts/check-macos-target.mjs" \
 echo "準備 App 圖示：$APP_ICON_SOURCE"
 mkdir -p "$SCRIPT_DIR/build"
 cp "$APP_ICON_SOURCE" "$SCRIPT_DIR/build/appicon.png"
+for file_icon in documenticon mediaicon imageicon archiveicon; do
+  cp "$FILE_ICON_STYLES_DIR/$FILE_ICON_STYLE/$file_icon.png" "$SCRIPT_DIR/build/$file_icon.png"
+done
 
 echo "從專案目錄建立非沙盒 Wails App..."
 "$WAILS_BIN" build -clean -s -m -trimpath -nosyncgomod -ldflags "$BUILD_LDFLAGS"

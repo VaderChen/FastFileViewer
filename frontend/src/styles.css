@@ -1236,11 +1236,13 @@ body.resizing-library {
 .settings-tabs {
   display: flex;
   gap: 4px;
+  overflow-x: auto;
   padding: 10px 14px 0;
   border-bottom: 1px solid #e1e6e2;
 }
 
 .settings-tab {
+  flex: 0 0 auto;
   min-width: 86px;
   height: 34px;
   padding: 0 14px;

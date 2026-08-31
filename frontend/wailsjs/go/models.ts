@@ -30,6 +30,7 @@ export namespace app {
 	    defaultPath: string;
 	    supportedImages: string[];
 	    supportedDocuments: string[];
+	    supportedCode: string[];
 	    supportedMedia: string[];
 	    supportedPacks: string[];
 	
@@ -42,6 +43,7 @@ export namespace app {
 	        this.defaultPath = source["defaultPath"];
 	        this.supportedImages = source["supportedImages"];
 	        this.supportedDocuments = source["supportedDocuments"];
+	        this.supportedCode = source["supportedCode"];
 	        this.supportedMedia = source["supportedMedia"];
 	        this.supportedPacks = source["supportedPacks"];
 	    }
