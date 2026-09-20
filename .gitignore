@@ -2,6 +2,7 @@
 .DS_Store
 ._*
 *.bak
+*.bak.*
 .idea/
 .vscode/
 .codex-tmp/
@@ -17,11 +18,27 @@ package-dmg.command
 package-dmg.sh
 /data/
 *.p12
+*.pfx
+*.pem
 *.key
 *.cer
 *.provisionprofile
 *.mobileprovision
 entitlements.plist
+
+# 私人金鑰、帳號憑證與本機鑰匙圈
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+.netrc
+.npmrc.local
+.pypirc
+credentials.json
+credentials.local.json
+service-account*.json
+*.keychain
+*.keychain-db
 
 # 建置與發行產物
 /build/bin/

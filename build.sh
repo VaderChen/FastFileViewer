@@ -242,7 +242,7 @@ cp "$APP_ICON_SOURCE" "$STAGING_DIR/build/appicon.png"
 echo "建立非沙盒 Wails App..."
 (
   cd "$STAGING_DIR"
-  "$WAILS_BIN" build -clean -s -ldflags "$BUILD_LDFLAGS"
+  "$WAILS_BIN" build -clean -s -trimpath -ldflags "$BUILD_LDFLAGS"
 )
 if [[ ! -d "$STAGING_APP_PATH" ]]; then
   echo "建置失敗：找不到 $STAGING_APP_PATH"
@@ -276,6 +276,9 @@ cleanup_appledouble "$STAGING_APP_PATH"
 cleanup_codesign_artifacts "$STAGING_APP_PATH"
 chmod -R u+rwX,go+rX "$STAGING_APP_PATH"
 xattr -cr "$STAGING_APP_PATH" 2>/dev/null || true
+
+# 驗證整個 App 的發行內容（包含 FFmpeg）。
+node "$SCRIPT_DIR/scripts/check-privacy.mjs" --artifact "$STAGING_APP_PATH"
 
 if [[ -d "$STAGING_APP_PATH/Contents/Resources/bin" ]]; then
   NESTED_SIGNING_ARGUMENTS=(--force --sign "$CODESIGN_IDENTITY" --options runtime)
