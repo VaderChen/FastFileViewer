@@ -8,6 +8,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FFMPEG_VERSION="${FFMPEG_VERSION:-8.1.2}"
 PREFIX="${FFMPEG_PREFIX:-$PROJECT_DIR/third_party/ffmpeg}"
 PREFIX_BACKUP="$PREFIX.bak"
+CONFIGURE_PREFIX="/fastfileviewer/ffmpeg"
 SOURCE_ROOT="${FFMPEG_SOURCE_ROOT:-${TMPDIR:-/tmp}/fastfileviewer-ffmpeg-source}"
 ARCHIVE="$SOURCE_ROOT/ffmpeg-$FFMPEG_VERSION.tar.xz"
 SOURCE_DIR="$SOURCE_ROOT/ffmpeg-$FFMPEG_VERSION"
@@ -41,17 +42,34 @@ if [[ -e "$PREFIX_BACKUP" ]]; then
   echo "備份目錄已存在，請先確認後移除：$PREFIX_BACKUP"
   exit 1
 fi
-if [[ -e "$PREFIX" ]]; then
-  mv "$PREFIX" "$PREFIX_BACKUP"
-fi
-mkdir -p "$PREFIX"
+STAGE_ROOT="$(mktemp -d /tmp/fastfileviewer-ffmpeg-install.XXXXXX)"
+INSTALL_PREFIX="$STAGE_ROOT$CONFIGURE_PREFIX"
+COMPILER_FLAGS_FILE="$STAGE_ROOT/compiler-flags.rsp"
+trap 'rm -rf "$STAGE_ROOT"' EXIT
+
+# configure 參數會存入執行檔；本機路徑對映只透過編譯環境傳入。
+# Clang response 檔可保留來源目錄中的空白與引號。
+append_source_map() {
+  local source_path="$1" public_path="$2" compiler_flag
+  [[ -n "$source_path" ]] || return 0
+  compiler_flag="-ffile-prefix-map=$source_path=$public_path"
+  compiler_flag="${compiler_flag//\\/\\\\}"
+  compiler_flag="${compiler_flag//\"/\\\"}"
+  printf '"%s"\n' "$compiler_flag" >> "$COMPILER_FLAGS_FILE"
+}
+append_source_map "${HOME:-}" "home"
+append_source_map "$PROJECT_DIR" "fastfileviewer"
+append_source_map "${PROJECT_DIR:A}" "fastfileviewer"
+append_source_map "$SOURCE_DIR" "ffmpeg"
+append_source_map "${SOURCE_DIR:A}" "ffmpeg"
 
 cd "$SOURCE_DIR"
 if [[ -f ffbuild/config.mak ]]; then
   make distclean
 fi
-./configure \
-  --prefix="$PREFIX" \
+CPPFLAGS="${CPPFLAGS:-} @$COMPILER_FLAGS_FILE" ./configure \
+  --prefix="$CONFIGURE_PREFIX" \
+  --install-name-dir=@rpath \
   --arch=arm64 \
   --target-os=darwin \
   --cc=clang \
@@ -81,22 +99,33 @@ fi
   --extra-cflags="-mmacosx-version-min=12.0" \
   --extra-ldflags="-mmacosx-version-min=12.0 -Wl,-rpath,@executable_path/../lib"
 make -j"$(sysctl -n hw.ncpu)"
-make install
+make install DESTDIR="$STAGE_ROOT"
 
-mkdir -p "$PREFIX/share/licenses/ffmpeg"
-cp COPYING.LGPLv2.1 "$PREFIX/share/licenses/ffmpeg/COPYING.LGPLv2.1"
-mkdir -p "$PREFIX/share/licenses/opus" "$PREFIX/share/licenses/libvpx"
+mkdir -p "$INSTALL_PREFIX/share/licenses/ffmpeg"
+cp COPYING.LGPLv2.1 "$INSTALL_PREFIX/share/licenses/ffmpeg/COPYING.LGPLv2.1"
+mkdir -p "$INSTALL_PREFIX/share/licenses/opus" "$INSTALL_PREFIX/share/licenses/libvpx"
 OPUS_LIB_DIR="$(pkg-config --variable=libdir opus)"
 VPX_LIB_DIR="$(pkg-config --variable=libdir vpx)"
-cp "$OPUS_LIB_DIR/libopus.0.dylib" "$PREFIX/lib/"
-cp "$VPX_LIB_DIR/libvpx.12.dylib" "$PREFIX/lib/"
-curl --fail --location --retry 3 --output "$PREFIX/share/licenses/opus/COPYING" \
+cp "$OPUS_LIB_DIR/libopus.0.dylib" "$INSTALL_PREFIX/lib/"
+cp "$VPX_LIB_DIR/libvpx.12.dylib" "$INSTALL_PREFIX/lib/"
+curl --fail --location --retry 3 --output "$INSTALL_PREFIX/share/licenses/opus/COPYING" \
   "https://raw.githubusercontent.com/xiph/opus/v1.6.1/COPYING"
-curl --fail --location --retry 3 --output "$PREFIX/share/licenses/libvpx/LICENSE" \
+curl --fail --location --retry 3 --output "$INSTALL_PREFIX/share/licenses/libvpx/LICENSE" \
   "https://raw.githubusercontent.com/webmproject/libvpx/v1.16.0/LICENSE"
 
-if [[ ! -x "$PREFIX/bin/ffmpeg" || ! -x "$PREFIX/bin/ffprobe" ]]; then
+if [[ ! -x "$INSTALL_PREFIX/bin/ffmpeg" || ! -x "$INSTALL_PREFIX/bin/ffprobe" ]]; then
   echo "FFmpeg 建置完成但找不到 ffmpeg/ffprobe。"
+  exit 1
+fi
+mkdir -p "$(dirname "$PREFIX")"
+if [[ -e "$PREFIX" ]]; then
+  mv "$PREFIX" "$PREFIX_BACKUP"
+fi
+if ! mv "$INSTALL_PREFIX" "$PREFIX"; then
+  if [[ -e "$PREFIX_BACKUP" && ! -e "$PREFIX" ]]; then
+    mv "$PREFIX_BACKUP" "$PREFIX"
+  fi
+  echo "無法安裝 FFmpeg，請確認目的地與備份目錄。"
   exit 1
 fi
 echo "完成 LGPL FFmpeg：$PREFIX"
