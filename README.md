@@ -12,9 +12,9 @@
 
 ## 最新版本
 
-[1.26.1003 build 2237](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1003-build-2237) 加入啟動時自動偵測更新、關於頁面的「偵測更新」，以及包含進度的下載、安裝與重啟流程；同時提供圖片／影音資訊、相機 RAW 預覽與獨立的程式語言格式設定。目錄掃描、HLS 解析、表格排序與狀態輪詢進一步減少重複工作及記憶體配置。支援 Apple Silicon、macOS 12 以上；RAW 相機格式依 macOS 支援範圍而定。
+[1.26.1004 build 0026](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0026) 修正底部檔案資訊被裁切的問題。資訊列會依內容自動調整高度，窄視窗會換行，讓圖片 EXIF、影音資訊及 SHA-256 控制項保持可見。支援 Apple Silicon、macOS 12 以上；可透過關於頁面的「偵測更新」取得新版。
 
-變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-1.26.1003-build-2237.md)、[函式檢查報告](doc/function-optimization-followup.md) 與[效能基準及量測限制](doc/performance.md)。
+變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-1.26.1004-build-0026.md)、[函式檢查報告](doc/function-optimization-followup.md) 與[效能基準及量測限制](doc/performance.md)。
 
 ## 功能
 

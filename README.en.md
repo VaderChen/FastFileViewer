@@ -12,9 +12,9 @@
 
 ## Latest release
 
-[1.26.1003 build 2237](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1003-build-2237) adds startup update checks, **Check for Updates** in About, and automatic download, installation, and restart with progress. It also includes image/media information, camera RAW previews, and separate programming-language format settings, with further reductions in repeated work and allocations during scanning, HLS parsing, table sorting, and status polling. Requires Apple Silicon and macOS 12 or later; RAW camera compatibility depends on macOS.
+[1.26.1004 build 0026](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0026) fixes clipped file information at the bottom of the viewer. The information area now grows with its content and wraps in narrow panes, keeping image EXIF, media details, and SHA-256 controls visible. Requires Apple Silicon and macOS 12 or later. Choose **Check for Updates** in About to install the new release.
 
-See the [changelog](CHANGELOG.md), [release notes](doc/release-1.26.1003-build-2237.md), [function review](doc/function-optimization-followup.md), and [benchmarks and measurement limits](doc/performance.md).
+See the [changelog](CHANGELOG.md), [release notes](doc/release-1.26.1004-build-0026.md), [function review](doc/function-optimization-followup.md), and [benchmarks and measurement limits](doc/performance.md).
 
 ## Features
 

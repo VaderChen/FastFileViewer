@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.26.1004 build 0026 — 2026-10-04
+
+### File information display
+
+- Fix clipped file information below the viewer by allowing the footer height to follow its content.
+- Wrap the existing information fields in narrow panes and keep image EXIF, video/audio metadata, and the SHA-256 controls visible.
+- Keep loading and extended metadata on their own rows, with the checksum control alongside the basic fields when space permits.
+- Verify 40 native WebKit layout cases covering image/media metadata, loading states, window sizes, and library widths.
+
 ## 1.26.1003 build 2237 — 2026-10-03
 
 ### Metadata and camera RAW support

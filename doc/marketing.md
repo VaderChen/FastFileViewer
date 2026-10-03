@@ -58,7 +58,7 @@ FastFileViewer 將檔案瀏覽、內容檢查與媒體播放集中在桌面上�
 ### 本版更新內容
 
 ```text
-新增啟動時與關於頁面的版本偵測，以及附進度的自動下載、安裝與重啟。加入圖片／影音資訊、相機 RAW 預覽及獨立的程式語言格式設定；並減少掃描、HLS 解析、表格排序與狀態輪詢的重複工作和記憶體配置。
+修正底部檔案資訊被裁切的問題。資訊列依內容自動增高，窄視窗會換行，讓圖片 EXIF、影音資訊及 SHA-256 控制項正常顯示。
 ```
 
 ## English
@@ -115,7 +115,7 @@ file viewer,media player,image viewer,Markdown,code viewer,JSON,CSV,archive,subt
 ### What's New
 
 ```text
-Added update checks at startup and in About, with download and installation progress and automatic restart after confirmation. Added image and media information, camera RAW previews, and separate programming-language format settings. Reduced repeated work and memory allocations in scanning, HLS parsing, table sorting, and status polling.
+Fixed clipped file information below the viewer. The information area now grows with its content and wraps in narrow panes so image EXIF, media details, and SHA-256 controls remain visible.
 ```
 
 ## 日本語
@@ -172,5 +172,5 @@ FastFileViewer はファイル閲覧、内容確認、メディア再生をデ�
 ### このバージョンの新機能
 
 ```text
-起動時と「情報」での更新確認、進捗付きのダウンロードとインストール、承認後の自動再起動を追加しました。画像・メディア情報、カメラ RAW プレビュー、独立したプログラミング言語形式の設定に対応。スキャン、HLS 解析、表の並べ替え、状態の定期取得で重複処理とメモリ割り当てを削減しました。
+ビューア下部のファイル情報が切れる問題を修正しました。情報欄は内容に応じて高さを調整し、狭い表示領域では折り返して、画像 EXIF・メディア情報・SHA-256 操作を表示します。
 ```

@@ -12,9 +12,9 @@
 
 ## 最新バージョン
 
-[1.26.1003 build 2237](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1003-build-2237) では、起動時の更新確認、「情報」画面の更新確認ボタン、進捗表示付きのダウンロード・インストール・再起動を追加しました。画像・メディア情報、カメラ RAW プレビュー、独立したプログラミング言語形式設定にも対応し、スキャン、HLS 解析、表の並べ替え、状態取得の重複処理とメモリ割り当てを削減しています。Apple Silicon、macOS 12 以降に対応し、RAW の対応機種は macOS に依存します。
+[1.26.1004 build 0026](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0026) では、ビューア下部のファイル情報が切れる問題を修正しました。情報欄は内容に応じて高さを調整し、狭い表示領域では折り返して、画像 EXIF・メディア情報・SHA-256 操作を表示します。Apple Silicon、macOS 12 以降に対応しています。「情報」画面の更新確認から新版をインストールできます。
 
-[変更履歴](CHANGELOG.md)、[リリースノート](doc/release-1.26.1003-build-2237.md)、[関数単位の検証報告](doc/function-optimization-followup.md)、[ベンチマークと測定範囲](doc/performance.md)をご覧ください。
+[変更履歴](CHANGELOG.md)、[リリースノート](doc/release-1.26.1004-build-0026.md)、[関数単位の検証報告](doc/function-optimization-followup.md)、[ベンチマークと測定範囲](doc/performance.md)をご覧ください。
 
 ## 機能
 
