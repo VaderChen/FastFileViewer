@@ -15,14 +15,14 @@ Release builds bundle an LGPL shared-library build of FFmpeg 8.1.2 made by `scri
 | --- | --- | --- | --- | --- |
 | github.com/leaanthony/go-ansi-parser | v1.6.1 | See bundled license text | L036 | `darwin/arm64` |
 | github.com/leaanthony/slicer | v1.6.0 | See bundled license text | L019 | `darwin/arm64` |
-| github.com/leaanthony/u | v1.1.1 | See bundled license text | L040 | `darwin/arm64` |
-| github.com/pkg/errors | v0.9.1 | See bundled license text | L024 | `darwin/arm64` |
-| github.com/rivo/uniseg | v0.4.7 | See bundled license text | L027 | `darwin/arm64` |
+| github.com/leaanthony/u | v1.1.1 | See bundled license text | L041 | `darwin/arm64` |
+| github.com/pkg/errors | v0.9.1 | See bundled license text | L025 | `darwin/arm64` |
+| github.com/rivo/uniseg | v0.4.7 | See bundled license text | L028 | `darwin/arm64` |
 | github.com/rwcarlsen/goexif | v0.0.0-20190401172101-9e8deecbddbd | See bundled license text | L023 | `darwin/arm64` |
-| github.com/wailsapp/wails/v2 | v2.13.0 | See bundled license text | L034 | `darwin/arm64` |
-| golang.org/x/image | v0.45.0 | See bundled license text | L025 | `darwin/arm64` |
-| golang.org/x/sys | v0.47.0 | See bundled license text | L025 | `darwin/arm64` |
-| golang.org/x/text | v0.41.0 | See bundled license text | L025 | `darwin/arm64` |
+| github.com/wailsapp/wails/v2 | v2.13.0 | See bundled license text | L035 | `darwin/arm64` |
+| golang.org/x/image | v0.45.0 | See bundled license text | L026 | `darwin/arm64` |
+| golang.org/x/sys | v0.47.0 | See bundled license text | L026 | `darwin/arm64` |
+| golang.org/x/text | v0.41.0 | See bundled license text | L026 | `darwin/arm64` |
 
 ## npm Dependencies
 

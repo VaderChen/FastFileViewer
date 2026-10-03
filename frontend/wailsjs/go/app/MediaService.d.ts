@@ -3,6 +3,8 @@
 import {app} from '../models';
 import {context} from '../models';
 
+export function GetMediaMetadata(arg1:app.ImageEntry):Promise<app.MediaMetadata>;
+
 export function PrepareCompatibleMediaByPath(arg1:string,arg2:number):Promise<string>;
 
 export function PrepareDocumentByPath(arg1:string,arg2:number):Promise<string>;
