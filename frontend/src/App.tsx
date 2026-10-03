@@ -47,7 +47,9 @@ import { isMediaKind, isPlaybackMediaKind } from './types';
 import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
-import { isLibraryTree, moveLibraryEntry, mergeScannedNodes, removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
+import { isLibraryTree, moveLibraryEntries, mergeScannedNodes, removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
+import { buildVisibleTree, collectImages, collectImageRefs, containsSelectedImage, imagePrefetchCandidates, libraryCounts } from './libraryView';
+import { ScanQueue } from './scanQueue';
 import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize } from './downloads';
 import { useDownloads } from './useDownloads';
 import { useImageViewer } from './useImageViewer';
@@ -270,7 +272,7 @@ const messages = {
     sourceCode: '原始碼',
     license: '授權',
     copySourceUrl: '複製 GitHub 網址',
-    noWarranty: '本程式依 GPLv3 提供，不附帶任何擔保。完整授權與第三方通知包含於 App Bundle 的 Resources/Licenses。',
+    noWarranty: '本程式依原始碼公開・禁止商業販售授權提供，不附帶任何擔保。完整授權與第三方通知包含於 App Bundle 的 Resources/Licenses。',
     unavailable: '無法取得',
   },
   en: {
@@ -460,7 +462,7 @@ const messages = {
     sourceCode: 'Source Code',
     license: 'License',
     copySourceUrl: 'Copy GitHub URL',
-    noWarranty: 'This program is provided under GPLv3 without warranty. Complete license and third-party notices are included in the App Bundle under Resources/Licenses.',
+    noWarranty: 'This program is provided under the Source-Available, No-Commercial-Sales License without warranty. Complete license and third-party notices are included in the App Bundle under Resources/Licenses.',
     unavailable: 'Unavailable',
   },
   ja: {
@@ -650,7 +652,7 @@ const messages = {
     sourceCode: 'ソースコード',
     license: 'ライセンス',
     copySourceUrl: 'GitHub URL をコピー',
-    noWarranty: '本プログラムは GPLv3 に基づき、無保証で提供されます。完全なライセンスと第三者通知は App Bundle の Resources/Licenses に含まれます。',
+    noWarranty: '本プログラムはソース公開・商業販売禁止ライセンスに基づき、無保証で提供されます。完全なライセンスと第三者通知は App Bundle の Resources/Licenses に含まれます。',
     unavailable: '取得できません',
   },
 } satisfies Record<LocaleCode, Record<string, string>>;
@@ -1130,16 +1132,16 @@ export default function App() {
       });
       setSelectionAnchorId((current) => removed.has(current) ? '' : current);
     },
-    onEntryMoved: (oldId, replacement) => {
-      setTree((current) => current ? moveLibraryEntry(current, oldId, replacement) : current);
-      if (selectedImageId === oldId) setSelectedImageId('');
+    onEntriesMoved: (moves) => {
+      const movedIds = new Set(moves.map((move) => move.oldId));
+      setTree((current) => current ? moveLibraryEntries(current, moves) : current);
+      if (movedIds.has(selectedImageId)) setSelectedImageId('');
       setSelectedImageIds((current) => {
-        if (!current.has(oldId)) return current;
         const next = new Set(current);
-        next.delete(oldId);
-        return next;
+        for (const id of movedIds) next.delete(id);
+        return next.size === current.size ? current : next;
       });
-      setSelectionAnchorId((current) => current === oldId ? '' : current);
+      setSelectionAnchorId((current) => movedIds.has(current) ? '' : current);
     },
   });
 
@@ -1154,16 +1156,16 @@ export default function App() {
     if (!selectedNode) {
       return [];
     }
-    return collectImages(selectedNode);
-  }, [selectedNode]);
+    return selectedNode === displayTree ? allLibraryImages : collectImages(selectedNode);
+  }, [selectedNode, displayTree, allLibraryImages]);
 
   const selectedImageIndex = useMemo(
     () => visibleImages.findIndex((image) => image.id === selectedImageId),
     [selectedImageId, visibleImages],
   );
   const selectedImageEntry = useMemo(
-    () => visibleImages.find((image) => image.id === selectedImageId) ?? null,
-    [selectedImageId, visibleImages],
+    () => visibleImages[selectedImageIndex] ?? null,
+    [selectedImageIndex, visibleImages],
   );
 
   useEffect(() => {
@@ -1367,28 +1369,8 @@ export default function App() {
     if (!selectedImageEntry || selectedImageEntry.kind !== 'image' || imagePayload?.id !== selectedImageEntry.id) {
       return;
     }
-    const imageNavigationEntries = navigationImages
-      .map((item) => item.image)
-      .filter((image) => image.kind === 'image');
-    const currentIndex = imageNavigationEntries.findIndex((image) => image.id === selectedImageEntry.id);
-    if (currentIndex < 0) {
-      return;
-    }
     let cancelled = false;
-    const candidates: ImageEntry[] = [];
-    const candidateKeys = new Set<string>();
-    for (const offset of [1, -1, 2, -2]) {
-      const index = (currentIndex + offset + imageNavigationEntries.length) % imageNavigationEntries.length;
-      const candidate = imageNavigationEntries[index];
-      if (!candidate) {
-        continue;
-      }
-      const key = imagePayloadCacheKey(candidate);
-      if (key !== imagePayloadCacheKey(selectedImageEntry) && !candidateKeys.has(key)) {
-        candidateKeys.add(key);
-        candidates.push(candidate);
-      }
-    }
+    const candidates = imagePrefetchCandidates(navigationImages, selectedImageEntry);
     void (async () => {
       for (const candidate of candidates) {
         if (cancelled) {
@@ -1584,9 +1566,11 @@ export default function App() {
         setErrorMessage(firstResult.warnings.join('\n'));
       }
 
-      const scanTargetPath = pendingOpenFilePath.trim();
-      const queue = rootNode.children.filter((child) => child.kind === 'directory').map((child) => child.path);
-      prioritizeScanQueue(queue, scanTargetPath);
+      const scanTargetPath = normalizeFilePath(pendingOpenFilePath);
+      const queue = new ScanQueue(scanTargetPath ? (path) => isPathWithin(scanTargetPath, path) : undefined);
+      for (const child of rootNode.children) {
+        if (child.kind === 'directory') queue.push(child.path);
+      }
       setPendingDirectories(queue.length);
 
       let pendingNodes: LibraryNode[] = [];
@@ -1621,9 +1605,9 @@ export default function App() {
           if (result.warnings?.length) {
             setErrorMessage(result.warnings.join('\n'));
           }
-          const childDirectories = scannedNode.children.filter((child) => child.kind === 'directory').map((child) => child.path);
-          queue.push(...childDirectories);
-          prioritizeScanQueue(queue, scanTargetPath);
+          for (const child of scannedNode.children) {
+            if (child.kind === 'directory') queue.push(child.path);
+          }
           if (performance.now() - lastPublish >= 100) {
             publishScan();
             await yieldToUI();
@@ -2143,10 +2127,10 @@ export default function App() {
 
   const selectTreeImage = (node: LibraryNode, image: ImageEntry, event: MouseEvent<HTMLButtonElement>) => {
     const toggleSelection = event.metaKey || event.ctrlKey;
-    const imageOrder = navigationImages.map((item) => item.image);
     let nextSelection: Set<string>;
 
     if (event.shiftKey && selectionAnchorId) {
+      const imageOrder = navigationImages.map((item) => item.image);
       const anchorIndex = imageOrder.findIndex((item) => item.id === selectionAnchorId);
       const targetIndex = imageOrder.findIndex((item) => item.id === image.id);
       if (anchorIndex >= 0 && targetIndex >= 0) {
@@ -2230,10 +2214,11 @@ export default function App() {
     () => activeImage && activeImage.kind === 'video' ? findSidecarSubtitle(activeImage, allLibraryImages) : null,
     [activeImage, allLibraryImages],
   );
-  const totalImages = allLibraryImages.filter((entry) => entry.kind === 'image').length;
-  const totalDocuments = allLibraryImages.filter((entry) => entry.kind !== 'image' && !isMediaKind(entry.kind)).length;
-  const totalMedia = allLibraryImages.filter((entry) => isMediaKind(entry.kind)).length;
-  const totalArchives = displayTree ? countArchives(displayTree) : 0;
+  const totals = displayTree ? libraryCounts(displayTree) : null;
+  const totalImages = totals?.images ?? 0;
+  const totalDocuments = totals?.documents ?? 0;
+  const totalMedia = totals?.media ?? 0;
+  const totalArchives = totals?.archives ?? 0;
   // 原始影片移到垃圾桶後，用保存下來的新檔就地取代清單項目，不必重新掃描整個資料庫。
   const handleOriginalReplaced = (replacement: ImageEntry, replacedEntryId: string) => {
     setTree((current) => (current ? replaceLibraryEntry(current, replacedEntryId, replacement) : current));
@@ -3317,8 +3302,11 @@ function TreeNode({
   const expanded = expandedNodeIds.has(node.id);
   const hasExpandableItems = node.children.length > 0 || node.images.length > 0;
   const icon = node.kind === 'archive' ? faBoxArchive : expanded && hasExpandableItems ? faFolderOpen : faFolder;
-  const imageCount = countImages(node);
-  const selectedInCollapsedTree = !expanded && (containsImage(node, selectedImageId) || [...selectedImageIds].some((id) => containsImage(node, id)));
+  const imageCount = libraryCounts(node).entries;
+  const selectedInCollapsedTree = useMemo(
+    () => !expanded && containsSelectedImage(node, selectedImageId, selectedImageIds),
+    [expanded, node, selectedImageId, selectedImageIds],
+  );
   const selectedClass = selectedNodeId === node.id || selectedInCollapsedTree ? 'selected' : '';
   const pinned = node.kind === 'directory' && pinnedDirectories.has(normalizePinnedDirectory(node.path));
 
@@ -3410,28 +3398,6 @@ function TreeNode({
   );
 }
 
-function collectImages(node: LibraryNode): ImageEntry[] {
-  return [...node.images, ...node.children.flatMap((child) => collectImages(child))];
-}
-
-interface ImageNavigationItem {
-  image: ImageEntry;
-  node: LibraryNode;
-  ancestorIds: string[];
-}
-
-function collectImageRefs(node: LibraryNode, ancestorIds: string[] = []): ImageNavigationItem[] {
-  const currentAncestors = [...ancestorIds, node.id];
-  return [
-    ...node.children.flatMap((child) => collectImageRefs(child, currentAncestors)),
-    ...node.images.map((image) => ({
-      image,
-      node,
-      ancestorIds,
-    })),
-  ];
-}
-
 function firstImageInTreeOrder(node: LibraryNode): ImageEntry | null {
   for (const child of node.children) {
     const image = firstImageInTreeOrder(child);
@@ -3440,41 +3406,6 @@ function firstImageInTreeOrder(node: LibraryNode): ImageEntry | null {
     }
   }
   return node.images[0] ?? null;
-}
-
-function countImages(node: LibraryNode): number {
-  return node.images.length + node.children.reduce((sum, child) => sum + countImages(child), 0);
-}
-
-function containsImage(node: LibraryNode, imageId: string): boolean {
-  if (!imageId) {
-    return false;
-  }
-  return node.images.some((image) => image.id === imageId) || node.children.some((child) => containsImage(child, imageId));
-}
-
-function countArchives(node: LibraryNode): number {
-  return (node.kind === 'archive' ? 1 : 0) + node.children.reduce((sum, child) => sum + countArchives(child), 0);
-}
-
-function buildVisibleTree(node: LibraryNode | null, isRoot = true): LibraryNode | null {
-  if (!node) {
-    return null;
-  }
-
-  const children = node.children.flatMap((child) => {
-    const visibleChild = buildVisibleTree(child, false);
-    return visibleChild ? [visibleChild] : [];
-  });
-  const hasImages = node.images.length > 0 || children.length > 0;
-  if (!isRoot && !hasImages && node.scanned) {
-    return null;
-  }
-
-  return {
-    ...node,
-    children,
-  };
 }
 
 function findNode(node: LibraryNode, nodeId: string): LibraryNode | null {
@@ -3768,18 +3699,6 @@ function normalizeFilePath(filePath: string): string {
     return normalized.replace(/\/$/, '');
   }
   return normalized;
-}
-
-function prioritizeScanQueue(queue: string[], targetPath: string) {
-  const normalizedTarget = normalizeFilePath(targetPath);
-  if (!normalizedTarget) {
-    return;
-  }
-  queue.sort((left, right) => {
-    const leftPriority = isPathWithin(normalizedTarget, left) ? 0 : 1;
-    const rightPriority = isPathWithin(normalizedTarget, right) ? 0 : 1;
-    return leftPriority - rightPriority;
-  });
 }
 
 function isPathWithin(filePath: string, directoryPath: string): boolean {

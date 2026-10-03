@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.26.1003 — 2026-10-03
+
+### Performance and memory
+
+- Reduce repeated library-tree traversal and copying during scans, batch moves, workspace filtering, selection updates, and adjacent-image preparation.
+- Keep Finder-prioritized scanning and cancellation behavior while replacing repeated queue sorting with bounded FIFO chunks that release consumed paths.
+- Reuse natural-order comparators and avoid redundant table copies; unsorted CSV/TSV filtering retains only the visible rows and the existing truncation indicator.
+- Reduce allocations during filename sorting, duplicate detection, small bounded reads, PNG thumbnail encoding, and thumbnail-cache updates.
+- Keep thumbnail and archive caches bounded, stream local full-size images, and release obsolete asynchronous work and media resources promptly.
+
+### Reliability
+
+- Preserve stable ordering and supported Unicode filenames while indexing archives and resolving duplicate archive entries.
+- Invalidate cached content when its source changes and keep active readers valid until they close.
+- Improve cancellation, non-overwriting file completion, redirected download resolution, subtitle conversion, and stale-result handling.
+
+### Documentation and distribution
+
+- Add reproducible performance benchmarks and document their measurement limits.
+- Align README, contributor guidance, About license text, and build metadata with the existing project license in `LICENSE.md`.
+- Preserve the existing interface layout, controls, supported workflows, authentication behavior, and macOS 12 Apple Silicon target.
+
 ## 1.26.0830
 
 ### System file opening and startup performance

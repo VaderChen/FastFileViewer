@@ -12,6 +12,7 @@ CONFIGURE_PREFIX="/fastfileviewer/ffmpeg"
 SOURCE_ROOT="${FFMPEG_SOURCE_ROOT:-${TMPDIR:-/tmp}/fastfileviewer-ffmpeg-source}"
 ARCHIVE="$SOURCE_ROOT/ffmpeg-$FFMPEG_VERSION.tar.xz"
 SOURCE_DIR="$SOURCE_ROOT/ffmpeg-$FFMPEG_VERSION"
+CODEC_PREFIX="${CODEC_PREFIX:-$PROJECT_DIR/third_party/codecs}"
 
 for command_name in curl tar make clang pkg-config; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -24,7 +25,7 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   echo "此 FFmpeg 建置腳本只支援 Apple Silicon macOS。"
   exit 1
 fi
-if ! pkg-config --exists opus vpx; then
+if [[ ! -d "$CODEC_PREFIX/lib/pkgconfig" ]] && ! pkg-config --exists opus vpx; then
   echo "找不到 libopus 或 libvpx；請依官方 macOS 指南先安裝相依套件。"
   exit 1
 fi
@@ -46,6 +47,12 @@ STAGE_ROOT="$(mktemp -d /tmp/fastfileviewer-ffmpeg-install.XXXXXX)"
 INSTALL_PREFIX="$STAGE_ROOT$CONFIGURE_PREFIX"
 COMPILER_FLAGS_FILE="$STAGE_ROOT/compiler-flags.rsp"
 trap 'rm -rf "$STAGE_ROOT"' EXIT
+if [[ -d "$CODEC_PREFIX/lib/pkgconfig" ]]; then
+  # FFmpeg's C locale does not unescape pkg-config paths. A temporary alias
+  # keeps Unicode and spaces out of compiler arguments without copying files.
+  ln -s "${CODEC_PREFIX:A}" "$STAGE_ROOT/codecs"
+  export PKG_CONFIG_PATH="$STAGE_ROOT/codecs/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+fi
 
 # configure 參數會存入執行檔；本機路徑對映只透過編譯環境傳入。
 # Clang response 檔可保留來源目錄中的空白與引號。
@@ -106,12 +113,12 @@ cp COPYING.LGPLv2.1 "$INSTALL_PREFIX/share/licenses/ffmpeg/COPYING.LGPLv2.1"
 mkdir -p "$INSTALL_PREFIX/share/licenses/opus" "$INSTALL_PREFIX/share/licenses/libvpx"
 OPUS_LIB_DIR="$(pkg-config --variable=libdir opus)"
 VPX_LIB_DIR="$(pkg-config --variable=libdir vpx)"
-cp "$OPUS_LIB_DIR/libopus.0.dylib" "$INSTALL_PREFIX/lib/"
-cp "$VPX_LIB_DIR/libvpx.12.dylib" "$INSTALL_PREFIX/lib/"
+cp -P "$OPUS_LIB_DIR"/libopus*.dylib "$INSTALL_PREFIX/lib/"
+cp -P "$VPX_LIB_DIR"/libvpx*.dylib "$INSTALL_PREFIX/lib/"
 curl --fail --location --retry 3 --output "$INSTALL_PREFIX/share/licenses/opus/COPYING" \
-  "https://raw.githubusercontent.com/xiph/opus/v1.6.1/COPYING"
+  "https://raw.githubusercontent.com/xiph/opus/v$(pkg-config --modversion opus)/COPYING"
 curl --fail --location --retry 3 --output "$INSTALL_PREFIX/share/licenses/libvpx/LICENSE" \
-  "https://raw.githubusercontent.com/webmproject/libvpx/v1.16.0/LICENSE"
+  "https://raw.githubusercontent.com/webmproject/libvpx/v$(pkg-config --modversion vpx)/LICENSE"
 
 if [[ ! -x "$INSTALL_PREFIX/bin/ffmpeg" || ! -x "$INSTALL_PREFIX/bin/ffprobe" ]]; then
   echo "FFmpeg 建置完成但找不到 ffmpeg/ffprobe。"
@@ -132,5 +139,5 @@ echo "完成 LGPL FFmpeg：$PREFIX"
 echo "版本：$FFMPEG_VERSION"
 echo "configure：未啟用 --enable-gpl、--enable-nonfree、libx264、libx265 或 libxvid"
 if [[ -d "$PREFIX_BACKUP" ]]; then
-  find "$PREFIX_BACKUP" -depth -delete
+  rm -rf -- "$PREFIX_BACKUP"
 fi

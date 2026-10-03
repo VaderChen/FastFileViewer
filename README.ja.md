@@ -10,6 +10,12 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+## 最新バージョン
+
+[1.26.1003](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003) では、大規模ライブラリ、スキャンキュー、CSV／TSV 表、サムネイル、重複検出の処理速度とメモリ割り当てを改善し、キャンセルとキャッシュの管理を強化しました。既存の画面構成、操作、機能、認証方式を維持しています。Apple Silicon、macOS 12 以降に対応します。
+
+[変更履歴](CHANGELOG.md)、[リリースノート](doc/release-v1.26.1003.md)、[ベンチマークと測定範囲](doc/performance.md)をご覧ください。
+
 ## 機能
 
 - ローカルフォルダを段階的にスキャンし、画像、文書、ソースコード、メディア、字幕を統一ツリーで表示します。
@@ -36,13 +42,13 @@
 - ライブラリインデックスとサムネイルはローカルに保存され、ネットワークサービスを使用しません。
 - 繁体字中国語、英語、日本語の UI を提供します。
 
-## オープンソース版
+## ソース公開版
 
 公開ソース版は StoreKit と App Sandbox を使用せず、ローカルのリリース認証情報や端末固有の設定を含みません。現在のユーザーアカウントがアクセスできるファイルを利用できますが、macOS の保護対象フォルダでは追加の許可が必要になる場合があります。
 
 ## 開発とビルド
 
-必要環境は Apple Silicon Mac、macOS 12 以降、Go 1.26.6、Node.js、npm、Xcode Command Line Tools、`pkg-config`、libopus、libvpx です。内蔵 LGPL FFmpeg のビルドには `brew install pkg-config opus libvpx` を使用できます。
+- CMake と `pkg-config`（内蔵コーデックのビルドに必要です。`brew install cmake pkg-config` でインストールできます）
 
 ```bash
 git clone https://github.com/VaderChen/FastFileViewer.git
@@ -51,9 +57,12 @@ cd FastFileViewer
 ```
 
 ```bash
+./scripts/build-codec-deps-macos.sh
 ./scripts/build-ffmpeg-macos.sh
 ./build.sh
 ```
+
+コーデックは macOS 12 を対象にソースからビルドし、`third_party/codecs` と `third_party/ffmpeg` に保存します。より新しい macOS を要求するライブラリはパッケージ作成時に拒否します。
 
 出力は `dist/FastFileViewer.app` です。ビルド時にプロジェクトのライセンス、第三者ライセンス全文、通知、Git のビルドメタデータを App Bundle の `Contents/Resources` に含めます。
 
@@ -71,9 +80,6 @@ DMG の公開ツールと署名資格情報は本 Repository に含めず、非�
 
 Copyright (C) 2026 VaderChen.
 
-本プロジェクトはデュアルライセンスです。
+本プロジェクトは[ソース公開・商業販売禁止ライセンス 1.1](LICENSE.ja.md)を採用しています。条項を遵守する非販売の利用、変更、無料共有（組織内部での利用を含む）を許可します。詳細はライセンス全文を参照してください。別途の許諾に関する問い合わせは[ライセンス方針](COMMERCIAL-LICENSE.md)をご覧ください。
 
-1. オープンソース利用は [GNU General Public License v3.0](LICENSE) に従います。
-2. GPLv3 に準拠できない場合や別の商用条件が必要な場合は、[商用ライセンス](COMMERCIAL-LICENSE.md) を利用できます。
-
-第三者コンポーネントには各ライセンスが適用されます。[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。Contributor License Agreement の整備までは Issue と設計議論のみを受け付け、外部コードの Pull Request はマージしません。
+商業販売の制限を含む独自のソース公開ライセンスです。第三者コンポーネントには各ライセンスが適用されます。[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。Contributor License Agreement の整備までは Issue と設計議論のみを受け付け、外部コードの Pull Request はマージしません。

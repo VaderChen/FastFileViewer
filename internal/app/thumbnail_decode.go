@@ -16,6 +16,24 @@ import (
 // 不包含解碼器工作區及 Go GC 尚未回收的物件。
 var thumbnailPixels = newPixelBudget(maxDecodedImagePixels)
 
+// Reuse compression workspace between thumbnails; idle buffers remain GC-reclaimable.
+var thumbnailPNGBufferPool pngEncoderBufferPool
+
+type pngEncoderBufferPool struct {
+	pool sync.Pool
+}
+
+func (pool *pngEncoderBufferPool) Get() *png.EncoderBuffer {
+	if buffer, ok := pool.pool.Get().(*png.EncoderBuffer); ok {
+		return buffer
+	}
+	return nil
+}
+
+func (pool *pngEncoderBufferPool) Put(buffer *png.EncoderBuffer) {
+	pool.pool.Put(buffer)
+}
+
 type pixelBudget struct {
 	mu          sync.Mutex
 	limit, used int64
@@ -103,9 +121,20 @@ func renderThumbnailWithContext(ctx context.Context, entry ImageEntry, maxDimens
 	bounds := decoded.Bounds()
 	width, height := scaledDimensions(bounds.Dx(), bounds.Dy(), maxDimension)
 	thumbnail := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.BiLinear.Scale(thumbnail, thumbnail.Bounds(), decoded, bounds, draw.Over, nil)
+	// Avoid the scaling workspace when the source already fits the thumbnail.
+	if width == bounds.Dx() && height == bounds.Dy() {
+		draw.Draw(thumbnail, thumbnail.Bounds(), decoded, bounds.Min, draw.Over)
+	} else {
+		draw.BiLinear.Scale(thumbnail, thumbnail.Bounds(), decoded, bounds, draw.Over, nil)
+	}
 	var encoded bytes.Buffer
-	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+	// PNG retains its image and writer in the pooled encoder. Clear their large
+	// backing slices after Encode while keeping the returned PNG bytes alive.
+	defer func() {
+		thumbnail.Pix = nil
+		encoded = bytes.Buffer{}
+	}()
+	encoder := png.Encoder{CompressionLevel: png.BestSpeed, BufferPool: &thumbnailPNGBufferPool}
 	if err := encoder.Encode(&encoded, thumbnail); err != nil {
 		return nil, err
 	}

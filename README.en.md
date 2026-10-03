@@ -10,6 +10,12 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+## Latest release
+
+[1.26.1003](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003) improves processing time and memory allocation for large libraries, scan queues, CSV/TSV tables, thumbnails, and duplicate detection, with more reliable cancellation and cache lifecycles. It preserves the existing interface layout, controls, features, and authentication behavior. Apple Silicon and macOS 12 or later remain supported.
+
+See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003.md), and [benchmarks and measurement limits](doc/performance.md).
+
 ## Features
 
 - Incrementally scan local folders into a unified tree of images, documents, source code, media, and subtitles.
@@ -36,7 +42,7 @@
 - Persist library indexes, thumbnails, and adjacent-image caches locally without a network service.
 - Traditional Chinese, English, and Japanese interfaces.
 
-## Open Source Edition
+## Public Source Edition
 
 The public source edition does not use StoreKit or App Sandbox and does not contain local release credentials or machine-specific settings. It can access files already available to the current user account, while macOS may still request access to privacy-protected locations.
 
@@ -46,7 +52,7 @@ The public source edition does not use StoreKit or App Sandbox and does not cont
 - Go 1.26.6 or a compatible version
 - Node.js and npm
 - Xcode Command Line Tools
-- `pkg-config`, libopus, and libvpx (required to build the bundled LGPL FFmpeg; install with `brew install pkg-config opus libvpx`)
+- CMake and `pkg-config` (required to build bundled codec dependencies; install with `brew install cmake pkg-config`)
 
 ## Development
 
@@ -61,9 +67,12 @@ The development script runs Wails directly in the project directory. Frontend de
 ## Build
 
 ```bash
+./scripts/build-codec-deps-macos.sh
 ./scripts/build-ffmpeg-macos.sh
 ./build.sh
 ```
+
+Codec dependencies are built from source for macOS 12 into `third_party/codecs` and `third_party/ffmpeg`. App packaging rejects libraries requiring a newer macOS.
 
 The output is `dist/FastFileViewer.app`. The build runs Go and frontend verification and bundles the project license, complete third-party license texts, notices, and traceable Git build metadata under `Contents/Resources`.
 
@@ -79,9 +88,6 @@ FastFileViewer does not execute displayed source code or raw Markdown HTML and d
 
 Copyright (C) 2026 VaderChen.
 
-FastFileViewer is dual-licensed:
+FastFileViewer uses the [Source-Available, No-Commercial-Sales License 1.1](LICENSE.en.md). Non-sale use, modification, and free sharing, including internal organizational use, are allowed subject to its full terms. See the [licensing policy](COMMERCIAL-LICENSE.md) for separate-license inquiries.
 
-1. Open source use under the [GNU General Public License v3.0](LICENSE).
-2. A separate [commercial license](COMMERCIAL-LICENSE.md) for use cases that cannot comply with GPLv3 or require different commercial terms.
-
-Third-party components remain under their own terms. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Until a Contributor License Agreement is available, the project accepts issues and design discussions but does not merge external code contributions; see [CONTRIBUTING.md](CONTRIBUTING.md).
+This is a custom source-available license with commercial-sales restrictions. Third-party components remain under their own terms. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Until a Contributor License Agreement is available, the project accepts issues and design discussions but does not merge external code contributions; see [CONTRIBUTING.md](CONTRIBUTING.md).

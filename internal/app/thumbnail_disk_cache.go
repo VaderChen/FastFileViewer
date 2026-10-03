@@ -64,21 +64,27 @@ func (c *thumbnailDiskCache) initialize(directory string) error {
 
 func (c *thumbnailDiskCache) forget(path string) {
 	if element := c.entries[path]; element != nil {
-		c.bytes -= element.Value.(thumbnailDiskEntry).size
+		c.bytes -= element.Value.(*thumbnailDiskEntry).size
 		c.lru.Remove(element)
 		delete(c.entries, path)
 	}
 }
 
 func (c *thumbnailDiskCache) add(path string, size int64) {
-	c.forget(path)
-	c.entries[path] = c.lru.PushBack(thumbnailDiskEntry{path, size})
+	if element := c.entries[path]; element != nil {
+		entry := element.Value.(*thumbnailDiskEntry)
+		c.bytes += size - entry.size
+		entry.size = size
+		c.lru.MoveToBack(element)
+		return
+	}
+	c.entries[path] = c.lru.PushBack(&thumbnailDiskEntry{path, size})
 	c.bytes += size
 }
 
 func (c *thumbnailDiskCache) trim() error {
 	for len(c.entries) > maxThumbnailCacheFiles || c.bytes > maxThumbnailDiskBytes {
-		entry := c.lru.Front().Value.(thumbnailDiskEntry)
+		entry := c.lru.Front().Value.(*thumbnailDiskEntry)
 		if err := os.Remove(entry.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

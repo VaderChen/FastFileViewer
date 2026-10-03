@@ -1,0 +1,2 @@
+# Wails owns the formatting of its generated bindings.
+frontend/wailsjs/go/** linguist-generated=true -whitespace

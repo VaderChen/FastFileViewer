@@ -161,7 +161,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 ./build.sh
 ```
 
-建置會檢查 Go、前端相依套件、production build、測試與 audit，並將 GPLv3、第三方授權全文、通知及 `build-metadata.json` 放入 App Bundle 的 `Contents/Resources`。
+建置會檢查 Go、前端相依套件、production build、測試與 audit，並將專案授權全文、第三方授權全文、通知及 `build-metadata.json` 放入 App Bundle 的 `Contents/Resources`。
 
 ## 已知限制與檢查項目
 

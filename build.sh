@@ -109,7 +109,7 @@ prepare_bundled_ffmpeg() {
   local source_dir="$FFMPEG_BIN_DIR"
   local resource_dir="$BUILD_APP_PATH/Contents/Resources/bin"
   local resource_lib_dir="$BUILD_APP_PATH/Contents/Resources/lib"
-  local library dependency
+  local library dependency library_id
 
   mkdir -p "$resource_dir"
   cp "$source_dir/ffmpeg" "$source_dir/ffprobe" "$resource_dir/"
@@ -120,7 +120,14 @@ prepare_bundled_ffmpeg() {
   cp "$source_dir/../share/licenses/opus/COPYING" "$APP_LICENSE_DIR/Opus-COPYING.txt"
   cp "$source_dir/../share/licenses/libvpx/LICENSE" "$APP_LICENSE_DIR/libvpx-LICENSE.txt"
   for library in "$resource_lib_dir"/*.dylib(N.); do
-    install_name_tool -id "@rpath/$(basename "$library")" "$library"
+    # Preserve the ABI name used by dependents, including versioned symlinks.
+    # Hardened dyld requires the requested leaf name to match LC_ID_DYLIB.
+    library_id="$(otool -D "$library" | sed -n '2p')"
+    if [[ -z "$library_id" || ! -e "$resource_lib_dir/${library_id:t}" ]]; then
+      echo "動態函式庫缺少相符的安裝名稱：${library:t}"
+      exit 1
+    fi
+    install_name_tool -id "@rpath/${library_id:t}" "$library"
     while IFS= read -r dependency; do
       [[ -e "$resource_lib_dir/$(basename "$dependency")" ]] || continue
       install_name_tool -change "$dependency" "@rpath/$(basename "$dependency")" "$library"
@@ -204,6 +211,8 @@ done
 BUILD_LDFLAGS="-X github.com/VaderChen/FastFileViewer/internal/app.appVersion=$APP_MARKETING_VERSION -X github.com/VaderChen/FastFileViewer/internal/app.appCommit=$BUILD_COMMIT -X github.com/VaderChen/FastFileViewer/internal/app.appTag=$BUILD_TAG -X github.com/VaderChen/FastFileViewer/internal/app.appBuildState=$BUILD_STATE -X github.com/VaderChen/FastFileViewer/internal/app.appSourceURL=$BUILD_SOURCE_URL"
 
 validate_bundled_ffmpeg
+node "$SCRIPT_DIR/scripts/check-macos-target.mjs" \
+  "$FFMPEG_BIN_DIR/ffmpeg" "$FFMPEG_BIN_DIR/ffprobe" "$FFMPEG_BIN_DIR"/../lib/*.dylib
 
 echo "準備 App 圖示：$APP_ICON_SOURCE"
 mkdir -p "$SCRIPT_DIR/build"
@@ -244,6 +253,7 @@ chmod -R u+rwX,go+rX "$BUILD_APP_PATH"
 xattr -cr "$BUILD_APP_PATH" 2>/dev/null || true
 
 # 檢查整個 App（包含 FFmpeg），阻止本機路徑或機密進入發行產物。
+node "$SCRIPT_DIR/scripts/check-macos-target.mjs" "$BUILD_APP_PATH/Contents/MacOS/$APP_NAME"
 node "$SCRIPT_DIR/scripts/check-privacy.mjs" --artifact "$BUILD_APP_PATH"
 
 if [[ -d "$BUILD_APP_PATH/Contents/Resources/bin" ]]; then

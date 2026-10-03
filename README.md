@@ -10,6 +10,12 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
+## 最新版本
+
+[1.26.1003](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003) 著重大型圖庫、掃描佇列、CSV／TSV、縮圖及重複檔案檢查的速度與記憶體配置，並改善取消與快取生命週期。保留既有介面配置、操作、功能與認證方式；支援 Apple Silicon、macOS 12 以上。
+
+變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-v1.26.1003.md) 與[效能基準及量測限制](doc/performance.md)。
+
 ## 功能
 
 - 逐目錄掃描本機資料夾，建立圖片、文件、程式碼、影音與字幕的統一內容樹。
@@ -38,7 +44,7 @@
 - 目錄索引、縮圖及相鄰圖片快取均保存在本機，不需網路服務。
 - 繁體中文、英文與日文介面。
 
-## 開源版
+## 公開原始碼版
 
 公開原始碼版本不使用 StoreKit、不啟用 App Sandbox，也不包含個人化設定。應用程式可存取目前登入帳號原本就有權限的檔案與目錄；macOS 對桌面、文件、下載項目或外接磁碟等隱私保護位置仍可能要求授權。
 
@@ -48,7 +54,7 @@
 - Go 1.26.6 或相容版本
 - Node.js 與 npm
 - Xcode Command Line Tools
-- `pkg-config`、libopus、libvpx（建立內建 LGPL FFmpeg 時需要，可用 `brew install pkg-config opus libvpx` 安裝）
+- CMake 與 `pkg-config`（建立內建影音相依套件時需要，可用 `brew install cmake pkg-config` 安裝）
 
 建置腳本會使用 `go.mod` 指定的 Wails v2 版本。
 
@@ -70,9 +76,12 @@ cd FastFileViewer
 ## 建置 macOS App
 
 ```bash
+./scripts/build-codec-deps-macos.sh
 ./scripts/build-ffmpeg-macos.sh
 ./build.sh
 ```
+
+影音相依套件會以 macOS 12 為目標從原始碼建立，存放於 `third_party/codecs` 與 `third_party/ffmpeg`；App 建置會拒絕需要較新 macOS 的函式庫。
 
 輸出：
 
@@ -110,11 +119,8 @@ dist/FastFileViewer.app
 
 Copyright (C) 2026 VaderChen.
 
-本專案採雙軌授權：
+本專案採用[原始碼公開・禁止商業販售授權 1.1](LICENSE.md)，允許符合條款的非販售使用、修改及免費分享，包含公司或組織內部自用。完整條件以授權全文為準；另行授權的洽詢方式見[授權政策](COMMERCIAL-LICENSE.md)。
 
-1. 開放原始碼使用遵循 [GNU General Public License v3.0](LICENSE)。
-2. 無法遵循 GPLv3、需要閉源整合或其他商業條款者，可另行取得[商業授權](COMMERCIAL-LICENSE.md)。
-
-商業授權僅涵蓋授權方有權另行授權的程式碼與資產；第三方套件仍適用各自條款。第三方清冊請參閱 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+本授權為含商業販售限制的自訂原始碼公開授權。第三方元件仍適用各自條款，請參閱 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 正式 Contributor License Agreement 完成前，僅接受 Issue、文件回報與設計討論，詳見 [CONTRIBUTING.md](CONTRIBUTING.md)。

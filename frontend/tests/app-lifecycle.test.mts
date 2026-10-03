@@ -31,6 +31,54 @@ const result = (path: string, images?: ImageEntry[]) => ({ rootPath: path, node:
 const cache = (path: string) => JSON.stringify({ rootPath: path, tree: node(path), selectedNodeId: path, selectedImageId: '',
   expandedNodeIds: [path], scannedDirectories: 1, savedAt: Date.now() });
 
+test('directory scans preserve FIFO order and prioritize the pending Finder path', async () => {
+  for (const targeted of [false, true]) {
+    const calls: string[] = [];
+    const children: Record<string, string[]> = {
+      '/root': ['/root/b', '/root/a'], '/root/b': ['/root/b/deep'], '/root/a': ['/root/a/deep'],
+    };
+    const app = appHarness({
+      ConsumeOpenFilePaths: async () => targeted ? ['/root/a/deep/file.png'] : [],
+      ScanDirectory: async (path: string) => {
+        calls.push(path);
+        const current = node(path);
+        current.children = (children[path] ?? []).map(child => ({ ...node(child), scanned: false }));
+        if (path === '/root') current.children.push({ ...node('/root/pack.zip'), kind: 'archive' });
+        return { rootPath: path, node: current, warnings: [] };
+      },
+    });
+    try {
+      const cleanup = app.effect('consumeOpenFilesTail').run();
+      await flush();
+      app.scan('/root'); await flush();
+      assert.deepEqual(calls, targeted
+        ? ['/root', '/root/a', '/root/a/deep', '/root/b', '/root/b/deep']
+        : ['/root', '/root/b', '/root/a', '/root/b/deep', '/root/a/deep']);
+      assert.equal(app.rootNode()?.children.filter(child => child.scanned).length, 3);
+      assert.deepEqual(app.finished, [1]);
+      cleanup!();
+    } finally { app.dispose(); }
+  }
+});
+
+test('stopping a directory scan discards the remaining queued paths', async () => {
+  const pending = deferred<any>();
+  const calls: string[] = [];
+  const app = appHarness({ ScanDirectory: async (path: string) => {
+    calls.push(path);
+    if (path !== '/root') return pending.promise;
+    return { rootPath: path, node: { ...node(path), children: [node('/root/a'), node('/root/b')] }, warnings: [] };
+  } });
+  try {
+    app.scan('/root'); await flush();
+    app.button('Stop scan').props.onClick();
+    pending.resolve(result('/root/a')); await flush();
+    assert.deepEqual(calls, ['/root', '/root/a']);
+    assert.deepEqual(app.cancelled, [1]);
+    assert.deepEqual(app.finished, [1]);
+  } finally { app.dispose(); }
+});
+
 function appHarness(api: Record<string, any> = {}) {
   const h = hookHarness();
   const cancelled: number[] = [], finished: number[] = [], resetPaths: string[] = [];

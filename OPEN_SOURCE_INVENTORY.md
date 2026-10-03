@@ -1,14 +1,14 @@
-# 開源內容盤點
+# 公開內容盤點
 
 本文件記錄首次公開及後續維護時納入與排除的內容範圍。
 
-## 預計公開
+## 公開內容
 
 - Go、React、TypeScript 與 Wails 原始碼。
 - 圖片、文件、程式碼、壓縮檔瀏覽、內容工作區、安全 URL 下載、影片頁 `.m3u8` 解析／複選及公開未加密 HLS VOD 合併功能。
 - 發布 App 會將依 `scripts/build-ffmpeg-macos.sh` 建立的 LGPL FFmpeg/ffprobe 動態版本放入 App Bundle；開發模式若沒有 Bundle 才回退使用系統 FFmpeg。Repository 不包含預建 FFmpeg 二進位檔。
 - macOS Apple Silicon 開發與可重現 App 建置腳本。
-- App icon、GPLv3、商業授權說明、安全政策及開發文件。
+- App icon、專案授權全文、授權政策、安全政策及開發文件。
 - 第三方相依套件清冊產生工具。
 
 ## 不公開
@@ -21,10 +21,10 @@
 
 ## 發布維護檢查
 
-- GPLv3＋商業授權維持雙軌條款。
+- 專案授權以 `LICENSE.md` 為準，第三方元件各自條款保持完整。
 - Contributor License Agreement 完成前，不合併外部程式碼 Pull Request。
 - 每次發布前重新掃描 Token、個人路徑與大型二進位檔。
-- `LICENSE`、`THIRD-PARTY-NOTICES.md` 與建置產物內完整授權文字保持同步。
+- `LICENSE*.md`、`THIRD-PARTY-NOTICES.md` 與建置產物內完整授權文字保持同步。
 - Repository 名稱與 module path 使用 `FastFileViewer`／`github.com/VaderChen/FastFileViewer`。
 - 公開建置預設 Bundle ID 為 `com.vader.fastfileviewer`，不啟用 App Sandbox。
 - URL 下載安全政策、大小限制與網路邊界須與 `README*`、`SECURITY.md` 及 `doc/developer.md` 保持一致。

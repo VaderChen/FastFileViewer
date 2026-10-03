@@ -16,7 +16,7 @@ const metadata = {
   tag,
   buildState,
   sourceUrl,
-  license: "GPL-3.0-only",
+  license: "FastFileViewer Source-Available, No-Commercial-Sales License 1.1",
 };
 const resolvedOutputPath = resolve(outputPath);
 mkdirSync(dirname(resolvedOutputPath), { recursive: true });

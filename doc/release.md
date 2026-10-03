@@ -1,35 +1,53 @@
 # GitHub Release Guide
 
-## 公開原則
+## 版本與文件
 
-GitHub 公開來源只包含可重現建置所需的原始碼、通用腳本、圖示及授權文件；個人化設定與內部操作均不放入 Repository。
+目前版本為 `1.26.1003`。發布前更新 `wails.json` 的 `info.productVersion`、`CHANGELOG.md`、三語 README 與對應的 `doc/release-v<version>.md`。效能數據需連結基準方法及量測限制，不可視為整體 App 的等比例提升。
 
-## 發布前檢查
+專案授權以 `LICENSE.md` 及其翻譯為準。文件、About、npm package metadata、App 內的 `build-metadata.json` 與授權文字應一致；第三方元件保留各自條款。
 
-- [ ] README、授權文件與第三方通知內容一致。
-- [ ] `.env*`、`build/bin/`、`dist/`、`frontend/dist/`、安裝包與本機發布資產未加入 Git。
-- [ ] 原始碼不存在密碼、Token 或個人絕對路徑。
-- [ ] `go.mod` module 為 `github.com/VaderChen/FastFileViewer`。
-- [ ] `./build.sh` 完整通過。
-- [ ] App 內含 GPLv3、第三方授權與 build metadata。
-- [ ] About 顯示版本、Git tag／commit、建置狀態與授權資訊。
+## 建置與檢查
 
-## 建立版本
+Apple Silicon Mac 需具備 Go 1.26.6、Node.js／npm、Xcode Command Line Tools、CMake 與 `pkg-config`。
 
 ```bash
-git tag -a v1.26.0830 -m "FastFileViewer v1.26.0830"
-git push origin main --tags
+./scripts/build-codec-deps-macos.sh
+./scripts/build-ffmpeg-macos.sh
+APP_MARKETING_VERSION=1.26.1003 ./build.sh
 ```
 
-建議讓 tag 指向乾淨工作樹，再執行：
+第一個腳本以固定來源與 SHA-256 建立 macOS 12 的 Opus／libvpx；FFmpeg 腳本優先使用 `third_party/codecs`。App 建置驗證所有影音工具與動態函式庫的最低系統版本，避免本機套件升級改變支援範圍。
+
+`build.sh` 執行依賴驗證、Go vet、race tests、前端測試、TypeScript／Vite build 及 npm production audit，並產生第三方通知及完整授權文字。若通知檔有變更，先納入版本提交。
+
+確認 `Contents/Resources/Licenses` 包含專案與第三方授權，`build-metadata.json` 記錄正確版本、commit、tag、來源 URL 與工作樹狀態。公開原始碼及 App 均需通過 `scripts/check-privacy.mjs`。建置產物、本機設定及 `.bak` 不提交到 Git。
+
+## 標記與正式安裝包
+
+來源及文件驗證完成、工作樹乾淨後，建立單一版本 tag：
 
 ```bash
-APP_MARKETING_VERSION=1.26.0830 ./build.sh
+git tag -a v1.26.1003 -m "FastFileViewer v1.26.1003"
 ```
 
-## Release Notes 建議
+從該 tag 重新建置正式 App，指定本機可用的 Developer ID Application 身分；簽章憑證與公證設定只保存在本機。公開 DMG 須完成 App 與 DMG 的簽章、Apple 公證、票據釘選及 Gatekeeper 驗證。解開 DMG 後再次確認 App 版本、來源 commit、內建 FFmpeg／ffprobe、授權及最低 macOS 版本。
 
-- 說明主要使用情境與新增功能。
-- 列出支援的最低 macOS 與 CPU 架構。
-- 列出正式下載檔名。
-- 僅公開必要的使用者資訊，避免揭露內部操作或驗證細節。
+正式檔名為 `FastFileViewer-1.26.1003-arm64.dmg`，附同名 `.sha256`。相依套件來源包提供與安裝包相符的 FFmpeg、Opus、libvpx 原始碼及重建說明。
+
+## 上傳與發布
+
+```bash
+git push origin main
+git push origin v1.26.1003
+gh release create v1.26.1003 --verify-tag --draft \
+  --title "FastFileViewer v1.26.1003" \
+  --notes-file doc/release-v1.26.1003.md
+gh release upload v1.26.1003 \
+  dist/FastFileViewer-1.26.1003-arm64.dmg \
+  dist/FastFileViewer-1.26.1003-arm64.dmg.sha256 \
+  dist/FastFileViewer-1.26.1003-codec-sources.tar.gz \
+  dist/FastFileViewer-1.26.1003-codec-sources.tar.gz.sha256
+gh release edit v1.26.1003 --draft=false --latest
+```
+
+發布後核對遠端 main、tag、Release 指向相同 commit，確認附件名稱、大小與下載後的 SHA-256。Release Notes 說明使用者可感受到的改善、相容性及下載方式。

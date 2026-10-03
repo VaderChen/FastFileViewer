@@ -20,13 +20,13 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - 自動配對同目錄 sidecar 字幕，並轉換常見文字字幕格式供播放器顯示。
 - 「下載項目」只對使用者明確貼上或拖入的公開 HTTP/HTTPS URL 建立連出連線，包含未加密且已結束的 HLS VOD。
 
-## 開源身分
+## 專案身分
 
 - Repository：`https://github.com/VaderChen/FastFileViewer`
 - Go module：`github.com/VaderChen/FastFileViewer`
 - 預設 Bundle ID：`com.vader.fastfileviewer`
-- 開源授權：GPL-3.0-only
-- 可選商業授權：`COMMERCIAL-LICENSE.md`
+- 專案授權：`LICENSE.md`（原始碼公開・禁止商業販售授權 1.1）
+- 授權政策：`COMMERCIAL-LICENSE.md`
 - 最低 macOS：12.0
 - 架構：Apple Silicon arm64
 
@@ -55,9 +55,13 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `frontend/src/mediaSupport.ts`：sidecar 字幕配對與 WebVTT 轉換。
 - `frontend/src/useImageViewer.ts`、`frontend/src/imageLayout.ts`：圖片縮放、旋轉、置中、拖曳平移與版面計算。
 - `frontend/src/useWorkspace.ts`、`frontend/src/libraryTree.ts`：內容工作區篩選、分批載入、選取、匯出、重複偵測與樹狀資料合併。
+- `frontend/src/libraryView.ts`、`frontend/src/scanQueue.ts`：可見圖庫推導、分類統計、相鄰圖片收集與分塊掃描佇列。
+- `internal/app/bounded_read.go`、`internal/app/name_sort.go`：有界讀取的容量提示與低配置檔名比較。效能基準與限制見 [performance.md](performance.md)。
 - `frontend/src/useDownloads.ts`、`frontend/src/downloads.ts`：下載佇列、網址／HLS 候選處理、拖放與下載狀態輪詢。
 - `frontend/src/ThumbnailCard.tsx`、`frontend/src/format.ts`、`frontend/src/operations.ts`：縮圖卡片、格式化與可取消操作的共用前端邏輯。
 - `frontend/src/styles.css`：版面與 Viewer 樣式。
+- `scripts/build-codec-deps-macos.sh`：固定 Opus／libvpx 版本與來源 SHA-256，建立 macOS 12 arm64 動態函式庫。
+- `scripts/check-macos-target.mjs`：檢查影音工具與動態函式庫的 arm64 最低 macOS 版本。
 - `scripts/generate-third-party-notices.mjs`：產生第三方套件清冊與完整授權文字。
 - `scripts/write-build-metadata.mjs`：產生可追溯建置資訊。
 - `build/darwin/Info.plist`：macOS production bundle 模板。
@@ -180,5 +184,5 @@ node scripts/generate-third-party-notices.mjs
 2. 搜尋 Token、個人絕對路徑與安裝包。
 3. 執行完整 `./build.sh`。
 4. 驗證 App 內含 `Contents/Resources/Licenses` 與 `build-metadata.json`。
-5. 確認 About 顯示 GPLv3、來源 URL 與 commit/tag/build state。
+5. 確認 About 的授權說明與 `LICENSE.md` 一致，並顯示來源 URL 與 commit/tag/build state。
 6. 建立 Git tag 後再製作公開 Release，並核對下載檔。

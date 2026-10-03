@@ -10,7 +10,7 @@
 
 ## 程式碼貢獻
 
-本專案採 GPLv3 與商業授權雙軌制。為確保所有程式碼可合法使用相同雙軌條款，正式 Contributor License Agreement 完成前，專案暫不合併外部程式碼 Pull Request。
+本專案採用 [LICENSE.md](LICENSE.md) 所載的原始碼公開・禁止商業販售授權。正式 Contributor License Agreement 完成前，專案暫不合併外部程式碼 Pull Request。
 
 你仍可先建立 Issue 討論修改方向。後續啟用程式碼貢獻時，會在此文件列出測試、格式、提交與授權流程。
 

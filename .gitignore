@@ -41,11 +41,13 @@ service-account*.json
 *.keychain-db
 
 # 建置與發行產物
+/build/appicon.png
 /build/bin/
 /build/tools/
 /dist/
 /frontend/dist/
 /frontend/node_modules
+/third_party/codecs/
 /third_party/ffmpeg/
 /build/darwin/FFmpeg.entitlements.plist
 /doc/en/update_log_1.26.0629.log

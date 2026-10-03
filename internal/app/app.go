@@ -315,7 +315,7 @@ func (a *App) LoadLibraryCache(rootPath string) (string, error) {
 		return "", fmt.Errorf("目錄快取超過 %d MB 上限", maxLibraryCacheBytes/(1024*1024))
 	}
 	// Stat 與讀取必須使用同一 FD；即使檔案成長，讀取本身仍有上限。
-	payload, err := io.ReadAll(io.LimitReader(file, maxLibraryCacheBytes+1))
+	payload, err := readAllWithSizeHint(io.LimitReader(file, maxLibraryCacheBytes+1), openedInfo.Size())
 	if err != nil {
 		return "", fmt.Errorf("讀取目錄快取失敗: %w", err)
 	}
@@ -377,7 +377,7 @@ func (a *App) GetAppInfo() AppInfo {
 		Tag:          appTag,
 		BuildState:   appBuildState,
 		SourceURL:    appSourceURL,
-		License:      "GNU General Public License v3.0",
+		License:      "FastFileViewer Source-Available, No-Commercial-Sales License 1.1",
 	}
 }
 
@@ -542,39 +542,55 @@ func (a *App) DetectDuplicates(images []ImageEntry, operationID int64) ([]Duplic
 	operationCtx := a.operationContext(operationID)
 	defer a.FinishOperation(operationID)
 
-	sizeGroups := make(map[int64][]ImageEntry)
-	for _, entry := range images {
-		sizeGroups[entry.Size] = append(sizeGroups[entry.Size], entry)
-	}
-
-	groups := make(map[string][]ImageEntry)
-	for _, entries := range sizeGroups {
-		if len(entries) < 2 {
+	// Keep indices until a duplicate group is confirmed. The caller's entries
+	// already contain all metadata, including paths that need not be copied.
+	firstBySize := make(map[int64]int)
+	sizeGroups := make(map[int64][]int)
+	for index, entry := range images {
+		first, exists := firstBySize[entry.Size]
+		if !exists {
+			firstBySize[entry.Size] = index
 			continue
 		}
-		for _, entry := range entries {
+		if indices := sizeGroups[entry.Size]; len(indices) > 0 {
+			sizeGroups[entry.Size] = append(indices, index)
+		} else {
+			// A unique size needs no candidate slice and never needs hashing.
+			sizeGroups[entry.Size] = []int{first, index}
+		}
+	}
+
+	groups := make(map[string][]int)
+	var hashBuffer []byte
+	for _, indices := range sizeGroups {
+		if hashBuffer == nil {
+			hashBuffer = make([]byte, 32*1024)
+		}
+		for _, index := range indices {
 			if err := checkOperation(operationCtx); err != nil {
 				return nil, err
 			}
-			hash, err := hashEntry(operationCtx, entry)
+			hash, err := hashEntryWithBuffer(operationCtx, images[index], hashBuffer)
 			if err != nil {
 				if errors.Is(err, errOperationCancelled) {
 					return nil, err
 				}
 				continue
 			}
-			groups[hash] = append(groups[hash], entry)
+			groups[hash] = append(groups[hash], index)
 		}
 	}
 
 	duplicates := make([]DuplicateGroup, 0)
-	for hash, entries := range groups {
-		if len(entries) < 2 {
+	for hash, indices := range groups {
+		if len(indices) < 2 {
 			continue
 		}
+		entries := make([]ImageEntry, len(indices))
 		var totalBytes int64
-		for _, entry := range entries {
-			totalBytes += entry.Size
+		for offset, index := range indices {
+			entries[offset] = images[index]
+			totalBytes += images[index].Size
 		}
 		duplicates = append(duplicates, DuplicateGroup{Hash: hash, TotalBytes: totalBytes, Images: entries})
 	}
@@ -687,13 +703,13 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 	}
 
 	sort.SliceStable(node.Images, func(i, j int) bool {
-		return strings.ToLower(node.Images[i].Name) < strings.ToLower(node.Images[j].Name)
+		return lessLowercaseName(node.Images[i].Name, node.Images[j].Name)
 	})
 	sort.SliceStable(node.Children, func(i, j int) bool {
 		if node.Children[i].Kind != node.Children[j].Kind {
 			return kindRank(node.Children[i].Kind) < kindRank(node.Children[j].Kind)
 		}
-		return strings.ToLower(node.Children[i].Name) < strings.ToLower(node.Children[j].Name)
+		return lessLowercaseName(node.Children[i].Name, node.Children[j].Name)
 	})
 
 	return DirectoryScanResult{
@@ -1111,13 +1127,13 @@ func sortLibraryNodeWithContext(ctx context.Context, root *LibraryNode) error {
 		node := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
 		sort.SliceStable(node.Images, func(i, j int) bool {
-			return strings.ToLower(node.Images[i].Name) < strings.ToLower(node.Images[j].Name)
+			return lessLowercaseName(node.Images[i].Name, node.Images[j].Name)
 		})
 		sort.SliceStable(node.Children, func(i, j int) bool {
 			if node.Children[i].Kind != node.Children[j].Kind {
 				return kindRank(node.Children[i].Kind) < kindRank(node.Children[j].Kind)
 			}
-			return strings.ToLower(node.Children[i].Name) < strings.ToLower(node.Children[j].Name)
+			return lessLowercaseName(node.Children[i].Name, node.Children[j].Name)
 		})
 
 		for index := range node.Children {
@@ -1140,7 +1156,7 @@ func readEntryLimitedWithContext(operationCtx context.Context, entry ImageEntry,
 		return nil, err
 	}
 	defer reader.Close()
-	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	data, err := readAllWithSizeHint(io.LimitReader(reader, limit+1), entry.Size)
 	if err != nil {
 		return nil, err
 	}
@@ -1197,7 +1213,7 @@ func readThumbnailCache(cachePath string) ([]byte, error) {
 		return nil, errors.New("縮圖快取大小無效")
 	}
 	// A file may grow after Stat. Bound the read itself, not just its initial metadata.
-	data, err := io.ReadAll(io.LimitReader(file, maxThumbnailCacheBytes+1))
+	data, err := readAllWithSizeHint(io.LimitReader(file, maxThumbnailCacheBytes+1), info.Size())
 	if err != nil {
 		return nil, err
 	}
@@ -1366,6 +1382,12 @@ func checkOperation(operationCtx context.Context) error {
 }
 
 func hashEntry(operationCtx context.Context, entry ImageEntry) (string, error) {
+	return hashEntryWithBuffer(operationCtx, entry, nil)
+}
+
+// A duplicate scan hashes sequentially, so all entries can reuse one read
+// buffer. A standalone checksum still uses io.CopyBuffer's default buffer.
+func hashEntryWithBuffer(operationCtx context.Context, entry ImageEntry, buffer []byte) (string, error) {
 	reader, err := openEntryReader(operationCtx, entry)
 	if err != nil {
 		return "", err
@@ -1373,7 +1395,7 @@ func hashEntry(operationCtx context.Context, entry ImageEntry) (string, error) {
 	defer reader.Close()
 
 	hash := sha256.New()
-	written, err := io.Copy(hash, io.LimitReader(reader, maxExportBytes+1))
+	written, err := io.CopyBuffer(hash, io.LimitReader(reader, maxExportBytes+1), buffer)
 	if err != nil {
 		return "", err
 	}

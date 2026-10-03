@@ -1,71 +1,122 @@
 import type { ImageEntry, LibraryNode } from './types';
 
-// replaceLibraryEntry 會把樹狀清單裡的指定項目換成新檔案，未受影響的節點維持原本的參考以避免多餘重繪。
-export function replaceLibraryEntry(node: LibraryNode, replacedEntryId: string, replacement: ImageEntry): LibraryNode {
-  const replacedIndex = node.images.findIndex((entry) => entry.id === replacedEntryId);
-  const children = node.children.map((child) => replaceLibraryEntry(child, replacedEntryId, replacement));
-  const childrenChanged = children.some((child, position) => child !== node.children[position]);
-  if (replacedIndex < 0 && !childrenChanged) {
-    return node;
+// Only copy children when a descendant actually changes.
+function transformLibraryTree(node: LibraryNode, update: (node: LibraryNode) => LibraryNode): LibraryNode {
+  const current = update(node);
+  let children = current.children;
+  for (let index = 0; index < current.children.length; index++) {
+    const child = transformLibraryTree(current.children[index], update);
+    if (child !== current.children[index]) {
+      if (children === current.children) children = current.children.slice();
+      children[index] = child;
+    }
   }
-  const images = replacedIndex < 0
-    ? node.images
-    : [
-      ...node.images.slice(0, replacedIndex),
-      replacement,
-      ...node.images.slice(replacedIndex + 1),
-    ];
-  return { ...node, images, children };
+  return children === current.children ? current : { ...current, children };
 }
 
-// removeLibraryEntries 只複製實際受影響的分支，避免檔案操作後整棵樹失去參考相等性。
+function removeImages(images: ImageEntry[], shouldRemove: (entry: ImageEntry) => boolean): ImageEntry[] {
+  const first = images.findIndex(shouldRemove);
+  if (first < 0) return images;
+  const kept = images.slice(0, first);
+  for (let index = first + 1; index < images.length; index++) {
+    if (!shouldRemove(images[index])) kept.push(images[index]);
+  }
+  return kept;
+}
+
+const entryNameCollator = new Intl.Collator(undefined, { numeric: true });
+
+// replaceLibraryEntry 只複製實際受影響的分支，未變動的陣列也保留原參考。
+export function replaceLibraryEntry(node: LibraryNode, replacedEntryId: string, replacement: ImageEntry): LibraryNode {
+  const matches = (entry: ImageEntry) => entry.id === replacedEntryId;
+  return transformLibraryTree(node, (current) => {
+    const replacedIndex = current.images.findIndex(matches);
+    if (replacedIndex < 0) return current;
+    const images = current.images.slice();
+    images[replacedIndex] = replacement;
+    return { ...current, images };
+  });
+}
+
 export function removeLibraryEntries(node: LibraryNode, removedEntryIds: ReadonlySet<string>): LibraryNode {
-  if (removedEntryIds.size === 0) {
-    return node;
-  }
-  const images = node.images.filter((entry) => !removedEntryIds.has(entry.id));
-  const children = node.children.map((child) => removeLibraryEntries(child, removedEntryIds));
-  const childrenChanged = children.some((child, index) => child !== node.children[index]);
-  if (images.length === node.images.length && !childrenChanged) {
-    return node;
-  }
-  return { ...node, images, children };
+  if (removedEntryIds.size === 0) return node;
+  const shouldRemove = (entry: ImageEntry) => removedEntryIds.has(entry.id);
+  return transformLibraryTree(node, (current) => {
+    const images = removeImages(current.images, shouldRemove);
+    return images === current.images ? current : { ...current, images };
+  });
 }
 
 // 同批掃描結果只遍歷一次樹，未受影響的分支維持參考相等性。
 export function mergeScannedNodes(current: LibraryNode, scanned: LibraryNode[]): LibraryNode {
+  if (scanned.length === 0) return current;
   const updates = new Map(scanned.map((node) => [node.id, node]));
-  const merge = (node: LibraryNode): LibraryNode => {
+  return transformLibraryTree(current, (node) => {
     const replacement = updates.get(node.id);
-    let base = node;
-    if (replacement) {
-      const existingChildren = new Map(node.children.map((child) => [child.id, child]));
-      base = {
-        ...replacement,
-        children: replacement.children.map((child) => {
-          const existing = existingChildren.get(child.id);
-          return existing && child.kind === 'directory' && !child.scanned
-            ? { ...child, scanned: existing.scanned, images: existing.images, children: existing.children }
-            : child;
-        }),
-      };
+    if (!replacement) return node;
+    const existingChildren = new Map(node.children.map((child) => [child.id, child]));
+    let children = replacement.children;
+    for (let index = 0; index < replacement.children.length; index++) {
+      const child = replacement.children[index];
+      const existing = existingChildren.get(child.id);
+      if (existing && child.kind === 'directory' && !child.scanned) {
+        if (children === replacement.children) children = replacement.children.slice();
+        children[index] = { ...child, scanned: existing.scanned, images: existing.images, children: existing.children };
+      }
     }
-    const children = base.children.map(merge);
-    return children.every((child, index) => child === base.children[index]) ? base : { ...base, children };
-  };
-  return merge(current);
+    return { ...replacement, children };
+  });
 }
 
 // A move removes the old entry and inserts it only into its actual destination.
 export function moveLibraryEntry(node: LibraryNode, oldId: string, replacement: ImageEntry): LibraryNode {
-  const destination = node.kind === 'directory' && node.path === replacement.directoryPath;
-  let images = node.images.filter((entry) => entry.id !== oldId && (!destination || entry.id !== replacement.id));
-  if (destination) {
-    images = [...images, replacement].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  }
-  const children = node.children.map((child) => moveLibraryEntry(child, oldId, replacement));
-  if (!destination && images.length === node.images.length && children.every((child, index) => child === node.children[index])) return node;
-  return { ...node, images, children };
+  const removeOld = (entry: ImageEntry) => entry.id === oldId;
+  const removeAtDestination = (entry: ImageEntry) => entry.id === oldId || entry.id === replacement.id;
+  return transformLibraryTree(node, (current) => {
+    const destination = current.kind === 'directory' && current.path === replacement.directoryPath;
+    let images = removeImages(current.images, destination ? removeAtDestination : removeOld);
+    if (destination) {
+      if (images === current.images) images = images.slice();
+      images.push(replacement);
+      images.sort((a, b) => entryNameCollator.compare(a.name, b.name));
+    }
+    return images === current.images ? current : { ...current, images };
+  });
+}
+
+export interface LibraryEntryMove {
+  oldId: string;
+  replacement: ImageEntry;
+}
+
+// Apply a completed batch in one traversal, preserving sequential move semantics.
+export function moveLibraryEntries(node: LibraryNode, moves: readonly LibraryEntryMove[]): LibraryNode {
+  if (moves.length === 0) return node;
+  if (moves.length === 1) return moveLibraryEntry(node, moves[0].oldId, moves[0].replacement);
+  const lastRemoval = new Map<string, number>();
+  const destinations = new Map<string, Map<string, { replacement: ImageEntry; index: number }>>();
+  moves.forEach(({ oldId, replacement }, index) => {
+    lastRemoval.set(oldId, index);
+    let entries = destinations.get(replacement.directoryPath);
+    if (!entries) destinations.set(replacement.directoryPath, entries = new Map());
+    // Reinsert repeated identities so stable equal-name ordering follows the last move.
+    entries.delete(replacement.id);
+    entries.set(replacement.id, { replacement, index });
+  });
+  const removeOld = (entry: ImageEntry) => lastRemoval.has(entry.id);
+  return transformLibraryTree(node, (current) => {
+    const additions = current.kind === 'directory' ? destinations.get(current.path) : undefined;
+    const shouldRemove = additions ? (entry: ImageEntry) => removeOld(entry) || additions.has(entry.id) : removeOld;
+    let images = removeImages(current.images, shouldRemove);
+    if (additions) {
+      if (images === current.images) images = images.slice();
+      for (const { replacement, index } of additions.values()) {
+        if ((lastRemoval.get(replacement.id) ?? -1) <= index) images.push(replacement);
+      }
+      images.sort((a, b) => entryNameCollator.compare(a.name, b.name));
+    }
+    return images === current.images ? current : { ...current, images };
+  });
 }
 
 // Validate persisted trees before recursive render/search helpers consume them.

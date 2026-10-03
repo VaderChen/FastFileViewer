@@ -1,7 +1,7 @@
 import { Component, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { buildJsonPreview, parseDelimitedText, parseJsonDocument } from './structuredData';
-import type { JsonPreviewNode } from './structuredData';
+import { buildJsonPreview, parseDelimitedText, parseJsonDocument, selectDelimitedRows } from './structuredData';
+import type { DelimitedTableSort, JsonPreviewNode } from './structuredData';
 import './structuredViewers.css';
 
 const maxRenderedTableRows = 1_000;
@@ -82,22 +82,13 @@ function formatJsonPrimitive(value: unknown): string {
 export function DelimitedTableView({ text, delimiter, labels }: { text: string; delimiter: ',' | '\t'; labels: StructuredViewerLabels }) {
   const parsed = useMemo(() => parseDelimitedText(text, delimiter), [delimiter, text]);
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<{ column: number; direction: 'asc' | 'desc' } | null>(null);
+  const [sort, setSort] = useState<DelimitedTableSort | null>(null);
   const header = parsed.rows[0] ?? [];
   const dataRows = useMemo(() => parsed.rows.slice(1), [parsed.rows]);
-  const visibleRows = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    let nextRows = normalizedQuery
-      ? dataRows.filter((row) => row.some((cell) => cell.toLocaleLowerCase().includes(normalizedQuery)))
-      : dataRows;
-    if (sort) {
-      nextRows = [...nextRows].sort((left, right) => {
-        const comparison = compareTableValues(left[sort.column] ?? '', right[sort.column] ?? '');
-        return sort.direction === 'asc' ? comparison : -comparison;
-      });
-    }
-    return { rows: nextRows.slice(0, maxRenderedTableRows), truncated: nextRows.length > maxRenderedTableRows };
-  }, [dataRows, query, sort]);
+  const visibleRows = useMemo(
+    () => selectDelimitedRows(dataRows, query, sort, maxRenderedTableRows),
+    [dataRows, query, sort],
+  );
 
   const toggleSort = (column: number) => {
     setSort((current) => current?.column === column
@@ -138,13 +129,4 @@ export function DelimitedTableView({ text, delimiter, labels }: { text: string; 
       {parsed.truncated || visibleRows.truncated ? <div className="structured-warning">{labels.truncated}</div> : null}
     </div>
   );
-}
-
-function compareTableValues(left: string, right: string): number {
-  const leftNumber = Number(left);
-  const rightNumber = Number(right);
-  if (left.trim() !== '' && right.trim() !== '' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-    return leftNumber - rightNumber;
-  }
-  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
 }

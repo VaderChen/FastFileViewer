@@ -186,11 +186,11 @@ export namespace app {
 	    error?: string;
 	    createdAt: number;
 	    completedAt?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DownloadItem(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -209,11 +209,11 @@ export namespace app {
 	export class HLSCandidate {
 	    url: string;
 	    name: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new HLSCandidate(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
@@ -224,18 +224,18 @@ export namespace app {
 	    sourceUrl: string;
 	    name: string;
 	    candidates: HLSCandidate[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DownloadResolution(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sourceUrl = source["sourceUrl"];
 	        this.name = source["name"];
 	        this.candidates = this.convertValues(source["candidates"], HLSCandidate);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -304,8 +304,22 @@ export namespace app {
 	        this.skipped = source["skipped"];
 	    }
 	}
-
-
+	export class FileOperationFailure {
+	    path: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileOperationFailure(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.error = source["error"];
+	    }
+	}
+	
+	
 	export class ImagePayload {
 	    id: string;
 	    name: string;
@@ -328,5 +342,73 @@ export namespace app {
 	        this.location = source["location"];
 	    }
 	}
+	
+	export class MoveResult {
+	    originalIds: Record<string, string>;
+	    moved: ImageEntry[];
+	    failed: FileOperationFailure[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MoveResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.originalIds = source["originalIds"];
+	        this.moved = this.convertValues(source["moved"], ImageEntry);
+	        this.failed = this.convertValues(source["failed"], FileOperationFailure);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TrashResult {
+	    removedIds: string[];
+	    failed: FileOperationFailure[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TrashResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.removedIds = source["removedIds"];
+	        this.failed = this.convertValues(source["failed"], FileOperationFailure);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
+
