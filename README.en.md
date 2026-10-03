@@ -12,9 +12,9 @@
 
 ## Latest release
 
-[1.26.1003](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003) improves processing time and memory allocation for large libraries, scan queues, CSV/TSV tables, thumbnails, and duplicate detection, with more reliable cancellation and cache lifecycles. It preserves the existing interface layout, controls, features, and authentication behavior. Apple Silicon and macOS 12 or later remain supported.
+[1.26.1003-r2](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003-r2) further reduces repeated work and temporary allocations in archive-tree construction, UTF-16 decoding, HLS segment downloads, audio visualization, subtitle selection, and code highlighting. It preserves the existing interface layout, controls, features, and authentication behavior. Apple Silicon and macOS 12 or later remain supported.
 
-See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003.md), and [benchmarks and measurement limits](doc/performance.md).
+See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003-r2.md), [function review](doc/function-optimization.md), and [benchmarks and measurement limits](doc/performance.md).
 
 ## Features
 

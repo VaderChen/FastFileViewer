@@ -42,9 +42,40 @@ export function calculateLogSpectrumAmplitudes(
     const centerFrequency = minimumFrequency * frequencyRatio ** centerPosition;
     return interpolateSpectrumAmplitude(frequencyData, centerFrequency / binFrequency);
   });
-  const framePeak = Math.max(0.22, ...rawAmplitudes);
+  return normalizeSpectrumAmplitudes(rawAmplitudes);
+}
+
+// A player owns this small workspace for one audio graph. The returned array is
+// overwritten on each call and consumed synchronously by the canvas renderer.
+export function createLogSpectrumCalculator(sampleRate: number, fftSize: number, barCount: number) {
+  const minimumFrequency = 10;
+  const maximumFrequency = Math.max(minimumFrequency, Math.min(20_000, sampleRate / 2));
+  const frequencyRatio = maximumFrequency / minimumFrequency;
+  const binFrequency = sampleRate / fftSize;
+  const positions = Array.from({ length: barCount }, (_, index) => {
+    const centerPosition = barCount === 1 ? 0 : index / (barCount - 1);
+    return minimumFrequency * frequencyRatio ** centerPosition / binFrequency;
+  });
+  const idleAmplitudes = positions.map((_, index) => 0.025 + 0.018 * Math.sin(index * 0.55) ** 2);
+  const amplitudes = positions.map(() => 0);
+  return (frequencyData: Float32Array, idle: boolean): number[] => {
+    for (let index = 0; index < amplitudes.length; index += 1) {
+      amplitudes[index] = idle ? idleAmplitudes[index] : interpolateSpectrumAmplitude(frequencyData, positions[index]);
+    }
+    return idle ? amplitudes : normalizeSpectrumAmplitudes(amplitudes);
+  };
+}
+
+function normalizeSpectrumAmplitudes(amplitudes: number[]): number[] {
+  let framePeak = 0.22;
+  for (let index = 0; index < amplitudes.length; index += 1) {
+    framePeak = Math.max(framePeak, amplitudes[index]);
+  }
   const automaticGain = Math.min(1.45, 0.92 / framePeak);
-  return rawAmplitudes.map((amplitude) => Math.min(1, (amplitude * automaticGain) ** 0.85));
+  for (let index = 0; index < amplitudes.length; index += 1) {
+    amplitudes[index] = Math.min(1, (amplitudes[index] * automaticGain) ** 0.85);
+  }
+  return amplitudes;
 }
 
 function interpolateSpectrumAmplitude(frequencyData: Float32Array, binPosition: number): number {
@@ -71,30 +102,27 @@ export function findSidecarSubtitle(media: ImageEntry, entries: ImageEntry[]): I
     return null;
   }
   const mediaStem = fileStem(media.name).toLowerCase();
-  return entries
-    .filter((entry) => {
-      if (entry.kind !== 'subtitle' || entry.directoryPath !== media.directoryPath || entry.source !== media.source) {
-        return false;
-      }
-      if (entry.source === 'archive' && entry.archivePath !== media.archivePath) {
-        return false;
-      }
-      const subtitleStem = fileStem(entry.name).toLowerCase();
-      return subtitleStem === mediaStem || subtitleStem.startsWith(`${mediaStem}.`) || subtitleStem.startsWith(`${mediaStem}-`) || subtitleStem.startsWith(`${mediaStem}_`);
-    })
-    .sort((left, right) => {
-      const leftExact = fileStem(left.name).toLowerCase() === mediaStem ? 0 : 1;
-      const rightExact = fileStem(right.name).toLowerCase() === mediaStem ? 0 : 1;
-      if (leftExact !== rightExact) {
-        return leftExact - rightExact;
-      }
-      const leftPriority = subtitlePriority.indexOf(left.format);
-      const rightPriority = subtitlePriority.indexOf(right.format);
-      if (leftPriority !== rightPriority) {
-        return leftPriority - rightPriority;
-      }
-      return left.name.localeCompare(right.name);
-    })[0] ?? null;
+  const dotPrefix = `${mediaStem}.`;
+  const dashPrefix = `${mediaStem}-`;
+  const underscorePrefix = `${mediaStem}_`;
+  let best: ImageEntry | null = null;
+  let bestExact = 1;
+  let bestPriority = 0;
+  for (const entry of entries) {
+    if (entry.kind !== 'subtitle' || entry.directoryPath !== media.directoryPath || entry.source !== media.source) continue;
+    if (entry.source === 'archive' && entry.archivePath !== media.archivePath) continue;
+    const stem = fileStem(entry.name).toLowerCase();
+    const exact = stem === mediaStem ? 0 : 1;
+    if (exact && !stem.startsWith(dotPrefix) && !stem.startsWith(dashPrefix) && !stem.startsWith(underscorePrefix)) continue;
+    const priority = subtitlePriority.indexOf(entry.format);
+    if (best === null || exact < bestExact || (exact === bestExact &&
+      (priority < bestPriority || (priority === bestPriority && entry.name.localeCompare(best.name) < 0)))) {
+      best = entry;
+      bestExact = exact;
+      bestPriority = priority;
+    }
+  }
+  return best;
 }
 
 // sidecarSRTPath 由影片實際路徑推導同目錄、同檔名的 SRT；也適用 archive::inner/path 格式。

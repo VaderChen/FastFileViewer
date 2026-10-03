@@ -139,6 +139,30 @@ function appHarness(api: Record<string, any> = {}) {
     dispose: () => restores.reverse().forEach(restore => restore()) };
 }
 
+test('tree range selection preserves forward/reverse order and selection reconciliation', async () => {
+  const images = Array.from({ length: 5 }, (_, index) => entry(`/root/${index}.png`));
+  const app = appHarness({ ScanDirectory: async () => result('/root', images) });
+  const tree = () => find(app.render(), e => e.props?.node && e.props.depth === 0);
+  const select = (image: ImageEntry, shiftKey = false, metaKey = false) => {
+    const current = tree();
+    current.props.onSelectImage(current.props.node, image, { shiftKey, metaKey, ctrlKey: false });
+  };
+  const selected = () => [...tree().props.selectedImageIds];
+  try {
+    app.scan('/root'); await flush();
+    for (const [anchor, target] of [[1, 3], [3, 1]]) {
+      select(images[anchor]); select(images[target], true);
+      assert.deepEqual(selected(), images.slice(1, 4).map(image => image.id));
+    }
+    select(images[2], false, true);
+    app.effect('reconcileVisibleSelection').run();
+    assert.deepEqual(selected(), [images[1].id, images[3].id]);
+    select(entry('/root/missing.png'));
+    select(images[2], true);
+    assert.deepEqual(selected(), [images[2].id]);
+  } finally { app.dispose(); }
+});
+
 test('stopping during cache loading never restores a cached tree or starts a backend scan', async () => {
   const pending = deferred<string>();
   let scans = 0;

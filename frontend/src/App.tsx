@@ -48,7 +48,7 @@ import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, Downloa
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
 import { isLibraryTree, moveLibraryEntries, mergeScannedNodes, removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
-import { buildVisibleTree, collectImages, collectImageRefs, containsSelectedImage, imagePrefetchCandidates, libraryCounts } from './libraryView';
+import { buildVisibleTree, collectImages, collectImageRefs, containsSelectedImage, imagePrefetchCandidates, libraryCounts, reconcileVisibleSelection } from './libraryView';
 import { ScanQueue } from './scanQueue';
 import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize } from './downloads';
 import { useDownloads } from './useDownloads';
@@ -1181,11 +1181,7 @@ export default function App() {
     if (!visibleImages.some((image) => image.id === selectedImageId)) {
       setSelectedImageId(visibleImages[0].id);
     }
-    setSelectedImageIds((current) => {
-      const visibleIDs = new Set(visibleImages.map((image) => image.id));
-      const next = new Set([...current].filter((id) => visibleIDs.has(id)));
-      return next.size > 0 ? next : new Set([visibleImages[0].id]);
-    });
+    setSelectedImageIds((current) => reconcileVisibleSelection(visibleImages, current));
   }, [selectedImageId, visibleImages]);
 
   useEffect(() => {
@@ -2130,13 +2126,13 @@ export default function App() {
     let nextSelection: Set<string>;
 
     if (event.shiftKey && selectionAnchorId) {
-      const imageOrder = navigationImages.map((item) => item.image);
-      const anchorIndex = imageOrder.findIndex((item) => item.id === selectionAnchorId);
-      const targetIndex = imageOrder.findIndex((item) => item.id === image.id);
+      const anchorIndex = navigationImages.findIndex((item) => item.image.id === selectionAnchorId);
+      const targetIndex = navigationImages.findIndex((item) => item.image.id === image.id);
       if (anchorIndex >= 0 && targetIndex >= 0) {
         const start = Math.min(anchorIndex, targetIndex);
         const end = Math.max(anchorIndex, targetIndex);
-        nextSelection = new Set(imageOrder.slice(start, end + 1).map((item) => item.id));
+        nextSelection = new Set<string>();
+        for (let index = start; index <= end; index++) nextSelection.add(navigationImages[index].image.id);
       } else {
         nextSelection = new Set([image.id]);
       }
@@ -3225,12 +3221,15 @@ interface TreeNodeProps {
 }
 
 function CodeHighlight({ code, language, truncatedLabel }: { code: string; language: string; truncatedLabel: string }) {
-  const preview = limitDocumentPreview(normalizeDocumentLineEndings(code));
-  const highlighted = highlightSource(preview.text, language);
-  const lines = highlighted.split('\n');
-  if (lines.length > 1 && lines[lines.length - 1] === '') {
-    lines.pop();
-  }
+  const { preview, lines } = useMemo(() => {
+    const preview = limitDocumentPreview(normalizeDocumentLineEndings(code));
+    const highlighted = highlightSource(preview.text, language);
+    const lines = highlighted.split('\n');
+    if (lines.length > 1 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    return { preview, lines };
+  }, [code, language]);
   return (
     <>
       <pre className="hljs code-viewer">

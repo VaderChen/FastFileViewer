@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -558,10 +557,13 @@ func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, 
 		if depth >= 3 {
 			return errors.New("HLS master playlist nesting is too deep")
 		}
-		sort.SliceStable(playlist.Variants, func(i, j int) bool {
-			return playlist.Variants[i].Bandwidth > playlist.Variants[j].Bandwidth
-		})
-		playlistURL, err = url.Parse(playlist.Variants[0].URL)
+		preferred := playlist.Variants[0]
+		for _, variant := range playlist.Variants[1:] {
+			if variant.Bandwidth > preferred.Bandwidth {
+				preferred = variant
+			}
+		}
+		playlistURL, err = url.Parse(preferred.URL)
 		if err != nil {
 			return err
 		}
@@ -614,6 +616,9 @@ func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, 
 	}()
 
 	var total int64
+	// Segments are sequential. Keep one buffer for this download, released when
+	// it finishes or is cancelled, instead of allocating once per segment.
+	copyBuffer := make([]byte, 256*1024)
 	for _, segment := range playlist.Segments {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -642,10 +647,10 @@ func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, 
 		if expectedBytes > 0 && expectedBytes < remaining {
 			remaining = expectedBytes
 		}
-		written, copyErr := copyDownloadBody(ctx, tempFile, response.Body, remaining, func(delta int64) {
+		written, copyErr := copyDownloadBodyWithBuffer(ctx, tempFile, response.Body, remaining, func(delta int64) {
 			total += delta
 			d.setDownloadBytes(id, total)
-		})
+		}, copyBuffer)
 		response.Body.Close()
 		if copyErr != nil {
 			return copyErr
@@ -715,10 +720,16 @@ func (d *DownloadService) writeDownloadResponse(ctx context.Context, id string, 
 }
 
 func copyDownloadBody(ctx context.Context, destination io.Writer, source io.Reader, limit int64, progress func(int64)) (int64, error) {
+	return copyDownloadBodyWithBuffer(ctx, destination, source, limit, progress, nil)
+}
+
+func copyDownloadBodyWithBuffer(ctx context.Context, destination io.Writer, source io.Reader, limit int64, progress func(int64), buffer []byte) (int64, error) {
 	if limit <= 0 {
 		return 0, fmt.Errorf("download exceeds the %s size limit", formatDownloadBytes(maxDownloadBytes))
 	}
-	buffer := make([]byte, 256*1024)
+	if len(buffer) == 0 {
+		buffer = make([]byte, 256*1024)
+	}
 	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -941,19 +952,20 @@ func redactedDownloadURL(resourceURL *url.URL) string {
 	return redacted.String()
 }
 
+var embeddedHLSUnescaper = strings.NewReplacer(
+	`\/`, `/`,
+	`\u002F`, `/`,
+	`\u002f`, `/`,
+	`\u003A`, `:`,
+	`\u003a`, `:`,
+	`\x2F`, `/`,
+	`\x2f`, `/`,
+	`\x3A`, `:`,
+	`\x3a`, `:`,
+)
+
 func extractEmbeddedHLSURLs(content string, baseURL *url.URL) []string {
-	normalized := html.UnescapeString(content)
-	normalized = strings.NewReplacer(
-		`\/`, `/`,
-		`\u002F`, `/`,
-		`\u002f`, `/`,
-		`\u003A`, `:`,
-		`\u003a`, `:`,
-		`\x2F`, `/`,
-		`\x2f`, `/`,
-		`\x3A`, `:`,
-		`\x3a`, `:`,
-	).Replace(normalized)
+	normalized := embeddedHLSUnescaper.Replace(html.UnescapeString(content))
 
 	rawCandidates := absoluteHLSURLPattern.FindAllString(normalized, maxEmbeddedHLSCandidates)
 	for _, match := range quotedHLSURLPattern.FindAllStringSubmatch(normalized, maxEmbeddedHLSCandidates) {
@@ -1072,18 +1084,17 @@ func parseHLSAttributes(value string) map[string]string {
 	attributes := make(map[string]string)
 	start := 0
 	quoted := false
-	parts := make([]string, 0, 8)
-	for index, character := range value {
-		if character == '"' {
-			quoted = !quoted
+	for index := 0; index <= len(value); index++ {
+		if index < len(value) {
+			if value[index] == '"' {
+				quoted = !quoted
+			}
+			if value[index] != ',' || quoted {
+				continue
+			}
 		}
-		if character == ',' && !quoted {
-			parts = append(parts, value[start:index])
-			start = index + 1
-		}
-	}
-	parts = append(parts, value[start:])
-	for _, part := range parts {
+		part := value[start:index]
+		start = index + 1
 		key, attributeValue, found := strings.Cut(part, "=")
 		if !found {
 			continue
@@ -1442,6 +1453,7 @@ func removeDownloadID(ids []string, target string) []string {
 			filtered = append(filtered, id)
 		}
 	}
+	clear(ids[len(filtered):])
 	return filtered
 }
 

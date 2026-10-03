@@ -12,9 +12,9 @@
 
 ## 最新版本
 
-[1.26.1003](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003) 著重大型圖庫、掃描佇列、CSV／TSV、縮圖及重複檔案檢查的速度與記憶體配置，並改善取消與快取生命週期。保留既有介面配置、操作、功能與認證方式；支援 Apple Silicon、macOS 12 以上。
+[1.26.1003-r2](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003-r2) 進一步減少壓縮檔建樹、UTF-16 解碼、HLS 分段下載、音訊頻譜、字幕選擇及文件上色的重複計算與暫時記憶體配置。保留既有介面配置、操作、功能與認證方式；支援 Apple Silicon、macOS 12 以上。
 
-變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-v1.26.1003.md) 與[效能基準及量測限制](doc/performance.md)。
+變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-v1.26.1003-r2.md)、[函式檢查報告](doc/function-optimization.md) 與[效能基準及量測限制](doc/performance.md)。
 
 ## 功能
 

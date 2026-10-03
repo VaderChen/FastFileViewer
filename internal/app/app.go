@@ -684,7 +684,7 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 			continue
 		}
 		if isContent {
-			image := buildFileImageEntry(childPath, info.Size())
+			image := buildFileImageEntryWithExtension(childPath, info.Size(), extension)
 			node.Images = append(node.Images, image)
 			a.rememberImage(image)
 			continue
@@ -833,10 +833,11 @@ func entryByPath(filePath string) (ImageEntry, error) {
 	if !info.Mode().IsRegular() {
 		return ImageEntry{}, fmt.Errorf("不是有效檔案 %s: %w", absPath, errNotRegularFile)
 	}
-	if !isSupportedEntry(normalizedExtension(absPath)) {
-		return ImageEntry{}, fmt.Errorf("不支援的檔案格式: %s", normalizedExtension(absPath))
+	extension := normalizedExtension(absPath)
+	if !isSupportedEntry(extension) {
+		return ImageEntry{}, fmt.Errorf("不支援的檔案格式: %s", extension)
 	}
-	return buildFileImageEntry(absPath, info.Size()), nil
+	return buildFileImageEntryWithExtension(absPath, info.Size(), extension), nil
 }
 
 func loadImagePayload(entry ImageEntry) (ImagePayload, error) {
@@ -925,6 +926,10 @@ func buildArchiveNode(archivePath string) LibraryNode {
 }
 
 func buildFileImageEntry(filePath string, size int64) ImageEntry {
+	return buildFileImageEntryWithExtension(filePath, size, normalizedExtension(filePath))
+}
+
+func buildFileImageEntryWithExtension(filePath string, size int64, extension string) ImageEntry {
 	directory := filepath.Dir(filePath)
 	return ImageEntry{
 		ID:            hashID("file", filePath),
@@ -932,14 +937,15 @@ func buildFileImageEntry(filePath string, size int64) ImageEntry {
 		Path:          filePath,
 		DirectoryPath: directory,
 		Source:        "file",
-		Format:        normalizedExtension(filePath),
-		Kind:          entryKind(normalizedExtension(filePath)),
+		Format:        extension,
+		Kind:          entryKind(extension),
 		Size:          size,
 	}
 }
 
 func buildArchiveImageEntry(archivePath string, innerPath string, size int64) ImageEntry {
 	cleanInnerPath := strings.Trim(path.Clean(innerPath), "/")
+	extension := normalizedArchiveExtension(cleanInnerPath)
 	innerDirectory := path.Dir(cleanInnerPath)
 	if innerDirectory == "." {
 		innerDirectory = ""
@@ -956,8 +962,8 @@ func buildArchiveImageEntry(archivePath string, innerPath string, size int64) Im
 		Source:        "archive",
 		ArchivePath:   archivePath,
 		InnerPath:     cleanInnerPath,
-		Format:        normalizedArchiveExtension(cleanInnerPath),
-		Kind:          entryKind(normalizedArchiveExtension(cleanInnerPath)),
+		Format:        extension,
+		Kind:          entryKind(extension),
 		Size:          size,
 	}
 }
@@ -1078,17 +1084,10 @@ func addArchiveImageToNode(root *LibraryNode, image ImageEntry, childIndexes map
 	}
 
 	current := root
-	accumulated := ""
-	for _, part := range strings.Split(innerDirectory, "/") {
+	for part := range strings.SplitSeq(innerDirectory, "/") {
 		if part == "" || part == "." {
 			continue
 		}
-		if accumulated == "" {
-			accumulated = part
-		} else {
-			accumulated += "/" + part
-		}
-		virtualPath := root.Path + "::" + accumulated
 		indexes := childIndexes[current.Path]
 		if indexes == nil {
 			indexes = make(map[string]int)
@@ -1097,6 +1096,11 @@ func addArchiveImageToNode(root *LibraryNode, image ImageEntry, childIndexes map
 		// Store slice indices, not pointers that append may invalidate.
 		childIndex, exists := indexes[part]
 		if !exists {
+			// Existing ancestors already own their path; only build it for new nodes.
+			virtualPath := current.Path + "/" + part
+			if current == root {
+				virtualPath = root.Path + "::" + part
+			}
 			current.Children = append(current.Children, LibraryNode{
 				ID:       hashID("archive-dir", virtualPath),
 				Name:     part,
@@ -1511,8 +1515,8 @@ func normalizedExtension(filePath string) string {
 	if special := normalizedSpecialFileName(filepath.Base(filePath)); special != "" {
 		return special
 	}
-	lower := strings.ToLower(filePath)
-	if strings.HasSuffix(lower, ".tar.gz") {
+	// Only this ASCII suffix matters; avoid lowercasing the entire directory path.
+	if len(filePath) >= 7 && strings.EqualFold(filePath[len(filePath)-7:], ".tar.gz") {
 		return ".tar.gz"
 	}
 	return strings.ToLower(filepath.Ext(filePath))
@@ -1547,7 +1551,7 @@ func shouldIgnoreArchiveEntry(entryName string) bool {
 	if cleanName == "" || cleanName == "." {
 		return true
 	}
-	for _, part := range strings.Split(cleanName, "/") {
+	for part := range strings.SplitSeq(cleanName, "/") {
 		if shouldIgnoreEntryName(part) || part == "__MACOSX" {
 			return true
 		}
@@ -1564,12 +1568,12 @@ func splitArchiveImagePath(imagePath string) (string, string, bool) {
 }
 
 func splitArchiveEntryPath(imagePath string) (string, string, bool) {
-	parts := strings.SplitN(imagePath, "::", 2)
-	if len(parts) != 2 {
+	archivePath, innerPath, found := strings.Cut(imagePath, "::")
+	if !found {
 		return "", "", false
 	}
-	archivePath := strings.TrimSpace(parts[0])
-	innerPath := strings.Trim(path.Clean(parts[1]), "/")
+	archivePath = strings.TrimSpace(archivePath)
+	innerPath = strings.Trim(path.Clean(innerPath), "/")
 	if archivePath == "" || innerPath == "" {
 		return "", "", false
 	}
@@ -1678,7 +1682,27 @@ func decodeDocumentText(data []byte) string {
 }
 
 func normalizeLineEndings(text string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	start := strings.IndexByte(text, '\r')
+	if start < 0 {
+		return text
+	}
+	var normalized strings.Builder
+	normalized.Grow(len(text) - strings.Count(text[start:], "\r\n"))
+	normalized.WriteString(text[:start])
+	for {
+		normalized.WriteByte('\n')
+		start++
+		if start < len(text) && text[start] == '\n' {
+			start++
+		}
+		next := strings.IndexByte(text[start:], '\r')
+		if next < 0 {
+			normalized.WriteString(text[start:])
+			return normalized.String()
+		}
+		normalized.WriteString(text[start : start+next])
+		start += next
+	}
 }
 
 func scoreDecodedDocument(text string) int {
@@ -1743,11 +1767,23 @@ func decodeUTF16Document(data []byte) (string, bool) {
 	if data[0] == 0xfe {
 		byteOrder = binary.BigEndian
 	}
-	units := make([]uint16, 0, (len(data)-2)/2)
+	var decoded strings.Builder
+	decoded.Grow(len(data) - 2)
 	for index := 2; index+1 < len(data); index += 2 {
-		units = append(units, byteOrder.Uint16(data[index:index+2]))
+		value := rune(byteOrder.Uint16(data[index : index+2]))
+		if value >= 0xd800 && value <= 0xdbff && index+3 < len(data) {
+			next := rune(byteOrder.Uint16(data[index+2 : index+4]))
+			if next >= 0xdc00 && next <= 0xdfff {
+				value = utf16.DecodeRune(value, next)
+				index += 2
+			}
+		}
+		if utf16.IsSurrogate(value) {
+			value = utf8.RuneError
+		}
+		decoded.WriteRune(value)
 	}
-	return string(utf16.Decode(units)), true
+	return decoded.String(), true
 }
 
 func normalizeZipEntryName(file *zip.File) string {
@@ -1762,24 +1798,15 @@ func normalizeArchiveEntryName(entryName string) string {
 	if utf8.ValidString(entryName) && !strings.ContainsRune(entryName, utf8.RuneError) {
 		return entryName
 	}
-	raw := []byte(entryName)
-	candidates := []string{}
-	if utf8.Valid(raw) {
-		candidates = append(candidates, string(raw))
-	}
-	candidates = appendDecodedCandidate(candidates, raw, simplifiedchinese.GBK)
-	candidates = appendDecodedCandidate(candidates, raw, traditionalchinese.Big5)
-	candidates = appendDecodedCandidate(candidates, raw, charmap.CodePage437)
-	candidates = appendDecodedCandidate(candidates, raw, charmap.Windows1252)
-
 	best := entryName
 	bestScore := scoreEntryName(entryName)
-	seen := map[string]bool{entryName: true}
-	for _, candidate := range candidates {
-		if candidate == "" || seen[candidate] {
+	for _, enc := range []encoding.Encoding{simplifiedchinese.GBK, traditionalchinese.Big5, charmap.CodePage437, charmap.Windows1252} {
+		candidate, err := enc.NewDecoder().String(entryName)
+		if err != nil || candidate == "" {
 			continue
 		}
-		seen[candidate] = true
+		// Equal candidates cannot beat the strict score comparison. No candidate
+		// list or deduplication map is needed, and the first winner stays stable.
 		score := scoreEntryName(candidate)
 		if score > bestScore {
 			best = candidate
@@ -1787,14 +1814,6 @@ func normalizeArchiveEntryName(entryName string) string {
 		}
 	}
 	return best
-}
-
-func appendDecodedCandidate(candidates []string, raw []byte, enc encoding.Encoding) []string {
-	decoded, err := enc.NewDecoder().String(string(raw))
-	if err != nil {
-		return candidates
-	}
-	return append(candidates, decoded)
 }
 
 func scoreEntryName(name string) int {
@@ -2130,5 +2149,6 @@ func hashID(parts ...string) string {
 		_, _ = hash.Write([]byte(part))
 		_, _ = hash.Write([]byte{0})
 	}
-	return hex.EncodeToString(hash.Sum(nil))
+	var digest [sha1.Size]byte
+	return hex.EncodeToString(hash.Sum(digest[:0]))
 }

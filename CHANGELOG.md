@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.26.1003-r2 — 2026-10-03
+
+### Performance and memory
+
+- Reuse normalized extensions during scans and entry creation; construct archive-directory paths only when a new node is needed.
+- Normalize line endings with one output allocation and decode UTF-16 directly without complete code-unit and rune intermediates.
+- Reuse one copy buffer per HLS download, choose the highest-bandwidth variant in one pass, and reduce URL and attribute parsing allocations.
+- Precompute audio-spectrum sampling positions, reuse per-player amplitude arrays, and read only the analyser data required by the current visualization mode.
+- Select matching subtitles in one pass while preserving exact-name, format, locale, and stable-tie priorities.
+- Avoid indexing every visible ID during selection updates and reuse unchanged document-highlighting results within the component lifetime.
+
+### Validation and distribution
+
+- Add original-implementation comparisons, function benchmarks, UTF-16 code-unit coverage, HLS error and cancellation checks, and Canvas rendering comparisons.
+- Verify 146 frontend tests, 186 Go tests, two fuzz seed suites, race checks, and a further text-compatibility fuzz run.
+- Preserve the existing UI, operations, features, authentication, and macOS 12 Apple Silicon support.
+- Publish revision `v1.26.1003-r2` with a new build of App version `1.26.1003`; retain the original `v1.26.1003` release.
+
 ## 1.26.1003 — 2026-10-03
 
 ### Performance and memory

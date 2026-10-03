@@ -5,7 +5,7 @@ import { faClosedCaptioning, faSliders } from '@fortawesome/free-solid-svg-icons
 import {
   audioSpectrumMaximumDecibels,
   audioSpectrumMinimumDecibels,
-  calculateLogSpectrumAmplitudes,
+  createLogSpectrumCalculator,
   convertSubtitleToWebVTT,
   decodeSubtitleText,
   sidecarSubtitlePaths,
@@ -334,9 +334,10 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
 
     const frequencyData = new Float32Array(analyser.frequencyBinCount);
     const waveformData = new Uint8Array(analyser.fftSize);
+    const calculateSpectrum = createLogSpectrumCalculator(context.sampleRate, analyser.fftSize, 72);
     const draw = () => {
       if (visible) {
-        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, audio.paused, audioVisualizationMode, colorsEnabled);
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, audio.paused, audioVisualizationMode, colorsEnabled, calculateSpectrum);
       }
       if (visible && !audio.paused && !audio.ended) {
         audioAnimationRef.current = window.requestAnimationFrame(draw);
@@ -356,7 +357,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
         audioAnimationRef.current = null;
       }
       if (visible) {
-        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode, colorsEnabled);
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode, colorsEnabled, calculateSpectrum);
       }
     };
     const applyMuteImmediately = () => {
@@ -371,7 +372,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     applyMuteImmediately();
     if (audio.paused || audio.ended) {
       if (visible) {
-        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode, colorsEnabled);
+        drawAudioVisualization(canvas, analyser, frequencyData, waveformData, true, audioVisualizationMode, colorsEnabled, calculateSpectrum);
       }
     } else {
       startDrawing();
@@ -1031,6 +1032,7 @@ function drawAudioVisualization(
   idle: boolean,
   mode: AudioVisualizationMode,
   colorsEnabled: boolean,
+  calculateSpectrum: ReturnType<typeof createLogSpectrumCalculator>,
 ) {
   const context = canvas.getContext('2d');
   if (!context) {
@@ -1055,11 +1057,11 @@ function drawAudioVisualization(
   context.fillRect(0, 0, width, height);
 
   if (idle) {
-    frequencyData.fill(audioSpectrumMinimumDecibels);
-    waveformData.fill(128);
+    if (mode !== 'waveform') frequencyData.fill(audioSpectrumMinimumDecibels);
+    if (mode !== 'spectrum') waveformData.fill(128);
   } else {
-    analyser.getFloatFrequencyData(frequencyData);
-    analyser.getByteTimeDomainData(waveformData);
+    if (mode !== 'waveform') analyser.getFloatFrequencyData(frequencyData);
+    if (mode !== 'spectrum') analyser.getByteTimeDomainData(waveformData);
   }
 
   if (mode !== 'waveform') {
@@ -1067,7 +1069,7 @@ function drawAudioVisualization(
     // 使用整數像素邊界，避免浮點數 fillRect 造成個別柱受到不同程度的抗鋸齒。
     const gap = Math.max(1, Math.round(Math.max(2 * pixelRatio, width * 0.0025)));
     const barWidth = Math.max(1, Math.floor((width - gap * (barCount - 1)) / barCount));
-    const amplitudes = calculateLogSpectrumAmplitudes(frequencyData, analyser.context.sampleRate, analyser.fftSize, barCount, idle);
+    const amplitudes = calculateSpectrum(frequencyData, idle);
     // Colors 開啟時讓柱狀頻譜的色相緩慢流動；關閉時維持固定綠色。
     const colorPhase = performance.now() * 0.00035;
     // 擴大至包含橘、黃、綠、青、藍與紫藍色系。

@@ -99,6 +99,23 @@ export function containsSelectedImage(node: LibraryNode, selectedId: string, sel
   return false;
 }
 
+// Keep selection insertion order and the existing first-entry fallback. Only
+// collect selected IDs, instead of allocating an ID index for the whole view.
+export function reconcileVisibleSelection(images: readonly ImageEntry[], selectedIds: ReadonlySet<string>): Set<string> {
+  if (!images.length) return new Set();
+  if (!selectedIds.size) return new Set([images[0].id]);
+  const visible = new Set<string>();
+  for (const image of images) {
+    if (selectedIds.has(image.id)) visible.add(image.id);
+    if (visible.size === selectedIds.size) break;
+  }
+  const next = new Set<string>();
+  for (const id of selectedIds) {
+    if (visible.has(id)) next.add(id);
+  }
+  return next.size ? next : new Set([images[0].id]);
+}
+
 // Keep the existing +1, -1, +2, -2 image-only prefetch order without flattening
 // and filtering the entire navigation list every time the current image changes.
 export function imagePrefetchCandidates(navigation: ImageNavigationItem[], selected: ImageEntry): ImageEntry[] {
