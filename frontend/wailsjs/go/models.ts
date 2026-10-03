@@ -78,70 +78,6 @@ export namespace app {
 	        this.size = source["size"];
 	    }
 	}
-	export class ImageMetadata {
-	    width: number;
-	    height: number;
-	    orientation?: string;
-	    make?: string;
-	    model?: string;
-	    lensModel?: string;
-	    dateTimeOriginal?: string;
-	    exposureTime?: string;
-	    fNumber?: string;
-	    iso?: string;
-	    focalLength?: string;
-	    gps?: string;
-	    colorModel?: string;
-
-	    static createFrom(source: any = {}) { return new ImageMetadata(source); }
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.width = source["width"];
-	        this.height = source["height"];
-	        this.orientation = source["orientation"];
-	        this.make = source["make"];
-	        this.model = source["model"];
-	        this.lensModel = source["lensModel"];
-	        this.dateTimeOriginal = source["dateTimeOriginal"];
-	        this.exposureTime = source["exposureTime"];
-	        this.fNumber = source["fNumber"];
-	        this.iso = source["iso"];
-	        this.focalLength = source["focalLength"];
-	        this.gps = source["gps"];
-	        this.colorModel = source["colorModel"];
-	    }
-	}
-	export class MediaMetadata {
-	    format?: string;
-	    duration?: string;
-	    bitRate?: string;
-	    videoCodec?: string;
-	    audioCodec?: string;
-	    width?: number;
-	    height?: number;
-	    frameRate?: string;
-	    pixelFormat?: string;
-	    sampleRate?: string;
-	    channels?: number;
-	    channelLayout?: string;
-
-	    static createFrom(source: any = {}) { return new MediaMetadata(source); }
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.format = source["format"];
-	        this.duration = source["duration"];
-	        this.bitRate = source["bitRate"];
-	        this.videoCodec = source["videoCodec"];
-	        this.audioCodec = source["audioCodec"];
-	        this.width = source["width"];
-	        this.height = source["height"];
-	        this.frameRate = source["frameRate"];
-	        this.pixelFormat = source["pixelFormat"];
-	        this.sampleRate = source["sampleRate"];
-	        this.channels = source["channels"];
-	        this.channelLayout = source["channelLayout"];
-	    }
-	}
 	export class LibraryNode {
 	    id: string;
 	    name: string;
@@ -386,6 +322,42 @@ export namespace app {
 	}
 	
 	
+	export class ImageMetadata {
+	    width: number;
+	    height: number;
+	    orientation?: string;
+	    make?: string;
+	    model?: string;
+	    lensModel?: string;
+	    dateTimeOriginal?: string;
+	    exposureTime?: string;
+	    fNumber?: string;
+	    iso?: string;
+	    focalLength?: string;
+	    gps?: string;
+	    colorModel?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImageMetadata(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.orientation = source["orientation"];
+	        this.make = source["make"];
+	        this.model = source["model"];
+	        this.lensModel = source["lensModel"];
+	        this.dateTimeOriginal = source["dateTimeOriginal"];
+	        this.exposureTime = source["exposureTime"];
+	        this.fNumber = source["fNumber"];
+	        this.iso = source["iso"];
+	        this.focalLength = source["focalLength"];
+	        this.gps = source["gps"];
+	        this.colorModel = source["colorModel"];
+	    }
+	}
 	export class ImagePayload {
 	    id: string;
 	    name: string;
@@ -409,6 +381,40 @@ export namespace app {
 	    }
 	}
 	
+	export class MediaMetadata {
+	    format?: string;
+	    duration?: string;
+	    bitRate?: string;
+	    videoCodec?: string;
+	    audioCodec?: string;
+	    width?: number;
+	    height?: number;
+	    frameRate?: string;
+	    pixelFormat?: string;
+	    sampleRate?: string;
+	    channels?: number;
+	    channelLayout?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MediaMetadata(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.duration = source["duration"];
+	        this.bitRate = source["bitRate"];
+	        this.videoCodec = source["videoCodec"];
+	        this.audioCodec = source["audioCodec"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.frameRate = source["frameRate"];
+	        this.pixelFormat = source["pixelFormat"];
+	        this.sampleRate = source["sampleRate"];
+	        this.channels = source["channels"];
+	        this.channelLayout = source["channelLayout"];
+	    }
+	}
 	export class MoveResult {
 	    originalIds: Record<string, string>;
 	    moved: ImageEntry[];
