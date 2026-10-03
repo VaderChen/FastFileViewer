@@ -33,16 +33,18 @@ FastFileViewer 是為 Apple Silicon Mac 設計的本機優先檔案工作台。�
 
 主要功能：
 - 支援 PNG、JPEG、GIF、WebP、BMP、SVG、TIFF、HEIC
+- 預覽 macOS 支援的相機 RAW，並顯示圖片 EXIF 與影音資訊
 - 預覽純文字、Markdown、程式碼、JSON、CSV、TSV 與常見設定檔
 - Markdown Render、語法高亮、JSON 樹與可搜尋排序的表格
 - 播放常見影片與音樂，支援字幕、跳轉、音量、全螢幕與快捷操作
 - 音樂柱狀頻譜、波形或雙模式視覺化，並記憶使用者選擇
-- MKV 與非原生音訊可搭配本機 ffmpeg 相容播放
+- 發布 App 內建 LGPL FFmpeg，提供 MKV 與非原生音訊相容播放
 - 三區式工作區、釘選資料夾、格式篩選、分批載入與可取消作業
 - 多選匯出、SHA-256 檢查與完全重複檔案偵測
 - 貼上或拖入公開網址下載圖片、影片、文章與一般檔案
 - 支援未加密、已結束的 HLS VOD，並可選擇網頁找到的多個影片串流
 - 繁體中文、英文與日文介面
+- 啟動時偵測 GitHub 新版，確認後顯示進度並自動下載、安裝及重啟
 
 FastFileViewer 將檔案瀏覽、內容檢查與媒體播放集中在桌面上，適合設計師、開發者、研究者，以及每天需要快速檢查本機素材的使用者。
 ```
@@ -56,7 +58,7 @@ FastFileViewer 將檔案瀏覽、內容檢查與媒體播放集中在桌面上�
 ### 本版更新內容
 
 ```text
-新增音樂頻譜與波形視覺化、更多影音格式相容播放、公開網址下載與 HLS VOD 支援；並改善 MKV 改封裝、下載安全性、取消操作與大型內容工作區的穩定性。
+新增啟動時與關於頁面的版本偵測，以及附進度的自動下載、安裝與重啟。加入圖片／影音資訊、相機 RAW 預覽及獨立的程式語言格式設定；並減少掃描、HLS 解析、表格排序與狀態輪詢的重複工作和記憶體配置。
 ```
 
 ## English
@@ -88,16 +90,18 @@ Supported content inside ZIP, TAR, TGZ, and TAR.GZ archives can be browsed witho
 
 Highlights:
 - Preview PNG, JPEG, GIF, WebP, BMP, SVG, TIFF, and HEIC
+- Preview camera RAW formats supported by macOS and inspect image EXIF and media information
 - Read plain text, Markdown, source code, JSON, CSV, TSV, and configuration files
 - Render Markdown, highlight syntax, browse JSON trees, and search or sort tables
 - Play common video and audio formats with subtitles, seeking, volume, fullscreen, and keyboard controls
 - Choose spectrum bars, waveform, or combined music visualization with a remembered preference
-- Use locally installed ffmpeg for MKV and non-native audio compatibility playback
+- Use bundled LGPL FFmpeg for MKV and non-native audio compatibility playback
 - Organize content with a three-pane workspace, pinned folders, filters, batch loading, and cancellable operations
 - Export selections, calculate SHA-256 checksums, and find byte-identical duplicates
 - Paste or drop public URLs to download images, videos, articles, and regular files
 - Download unencrypted, completed HLS VOD and select among multiple streams discovered on a page
 - Use Traditional Chinese, English, or Japanese interfaces
+- Check GitHub for updates at startup, then confirm to download, install, and restart with progress
 
 FastFileViewer brings file browsing, content inspection, and media playback together for designers, developers, researchers, and anyone who checks local assets every day.
 ```
@@ -111,7 +115,7 @@ file viewer,media player,image viewer,Markdown,code viewer,JSON,CSV,archive,subt
 ### What's New
 
 ```text
-Added music spectrum and waveform visualization, broader media compatibility, public URL downloads, and HLS VOD support. Improved MKV remux handling, download security, cancellable operations, and large-workspace stability.
+Added update checks at startup and in About, with download and installation progress and automatic restart after confirmation. Added image and media information, camera RAW previews, and separate programming-language format settings. Reduced repeated work and memory allocations in scanning, HLS parsing, table sorting, and status polling.
 ```
 
 ## 日本語
@@ -143,16 +147,18 @@ ZIP、TAR、TGZ、TAR.GZ 内の対応コンテンツも、先に展開せずに�
 
 主な機能：
 - PNG、JPEG、GIF、WebP、BMP、SVG、TIFF、HEIC の表示
+- macOS が対応するカメラ RAW のプレビューと画像 EXIF・メディア情報の表示
 - プレーンテキスト、Markdown、ソースコード、JSON、CSV、TSV、設定ファイルの表示
 - Markdown レンダリング、構文強調、JSON ツリー、表の検索と並べ替え
 - 字幕、シーク、音量、全画面、キーボード操作に対応した動画・音楽再生
 - スペクトラム、波形、または両方の音楽ビジュアライザーと設定の保存
-- ローカルにインストールした ffmpeg による MKV と非ネイティブ音声の互換再生
+- 同梱の LGPL FFmpeg による MKV と非ネイティブ音声の互換再生
 - 3 ペインワークスペース、ピン留めフォルダ、フィルター、分割読み込み、キャンセル可能な処理
 - 複数項目の書き出し、SHA-256 計算、完全一致重複ファイルの検出
 - 公開 URL を貼り付けまたはドロップして画像、動画、記事、ファイルをダウンロード
 - 暗号化されていない完了済み HLS VOD と、ページから見つかった複数ストリームの選択
 - 繁体字中国語、英語、日本語の UI
+- 起動時に GitHub の新版を確認し、承認後は進捗を表示してダウンロード・インストール・再起動
 
 FastFileViewer はファイル閲覧、内容確認、メディア再生をデスクトップにまとめます。デザイナー、開発者、研究者、日々ローカル素材を確認する方に適しています。
 ```
@@ -166,5 +172,5 @@ FastFileViewer はファイル閲覧、内容確認、メディア再生をデ�
 ### このバージョンの新機能
 
 ```text
-音楽スペクトラムと波形表示、幅広いメディア互換再生、公開 URL ダウンロード、HLS VOD に対応しました。MKV のリマックス、ダウンロードの安全性、キャンセル可能な処理、大規模ワークスペースの安定性も改善しています。
+起動時と「情報」での更新確認、進捗付きのダウンロードとインストール、承認後の自動再起動を追加しました。画像・メディア情報、カメラ RAW プレビュー、独立したプログラミング言語形式の設定に対応。スキャン、HLS 解析、表の並べ替え、状態の定期取得で重複処理とメモリ割り当てを削減しました。
 ```

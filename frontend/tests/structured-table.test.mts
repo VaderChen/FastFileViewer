@@ -66,6 +66,26 @@ test('sorting includes matching records beyond the visible row limit', () => {
   }
 });
 
+test('precomputed table keys preserve mixed numeric comparisons and shared record identities', () => {
+  const values = ['1e308', '-1e308', '0xF', ' 12.25 ', '-0', '0', '1e2', 'Infinity', 'NaN', '', '\u00a0',
+    'item002', 'Item2', 'item10', 'é', 'É', '中文3', '中文12'];
+  const rows = Array.from({ length: 2048 }, (_, index) => [values[(index * 7919) % values.length], String(index)]);
+  rows.splice(30, 0, rows[5], rows[5], [], ['short']);
+  const original = rows.slice();
+  for (const direction of ['asc', 'desc'] as const) {
+    for (const query of ['', 'item', '中文', 'absent']) {
+      for (const column of [0, 1, 2]) {
+        const sort = { column, direction };
+        const actual = selectDelimitedRows(rows, query, sort, 1000);
+        const expected = previousRows(rows, query, sort, 1000);
+        assert.deepEqual(actual, expected);
+        actual.rows.forEach((row, index) => assert.equal(row, expected.rows[index]));
+      }
+    }
+  }
+  rows.forEach((row, index) => assert.equal(row, original[index]));
+});
+
 test('unsorted filtering stops after the first omitted matching record', () => {
   let reads = 0;
   const rows = Array.from({ length: 4999 }, () => {

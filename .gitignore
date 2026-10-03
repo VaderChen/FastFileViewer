@@ -42,6 +42,10 @@ service-account*.json
 
 # 建置與發行產物
 /build/appicon.png
+/build/documenticon.png
+/build/imageicon.png
+/build/mediaicon.png
+/build/archiveicon.png
 /build/bin/
 /build/tools/
 /dist/

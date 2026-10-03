@@ -12,9 +12,9 @@
 
 ## 最新バージョン
 
-[1.26.1003-r2](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003-r2) では、アーカイブツリーの構築、UTF-16 デコード、HLS セグメントのダウンロード、音声スペクトラム、字幕選択、構文強調の重複処理と一時メモリ割り当てをさらに削減しました。既存の画面構成、操作、機能、認証方式を維持しています。Apple Silicon、macOS 12 以降に対応します。
+[1.26.1003 build 2237](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1003-build-2237) では、起動時の更新確認、「情報」画面の更新確認ボタン、進捗表示付きのダウンロード・インストール・再起動を追加しました。画像・メディア情報、カメラ RAW プレビュー、独立したプログラミング言語形式設定にも対応し、スキャン、HLS 解析、表の並べ替え、状態取得の重複処理とメモリ割り当てを削減しています。Apple Silicon、macOS 12 以降に対応し、RAW の対応機種は macOS に依存します。
 
-[変更履歴](CHANGELOG.md)、[リリースノート](doc/release-v1.26.1003-r2.md)、[関数単位の検証報告](doc/function-optimization.md)、[ベンチマークと測定範囲](doc/performance.md)をご覧ください。
+[変更履歴](CHANGELOG.md)、[リリースノート](doc/release-1.26.1003-build-2237.md)、[関数単位の検証報告](doc/function-optimization-followup.md)、[ベンチマークと測定範囲](doc/performance.md)をご覧ください。
 
 ## 機能
 
@@ -70,11 +70,15 @@ cd FastFileViewer
 
 ビルド済みファイルは [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) から取得できます。
 
+起動時に GitHub の新しい正式リリースを自動確認します。「設定 → 情報 → アップデートを確認」から手動確認もできます。新しいバージョンと変更内容を確認して「更新して再起動」を押すと、進捗を表示しながらダウンロードし、終了・インストール・再起動を自動で行います。ダウンロードと準備中はキャンセルできます。アプリ終了後は独立した更新ウィンドウが進捗を表示します。新版の画面が起動するまで旧版を保存し、失敗時は復元を試みます。正式に署名された Apple Silicon アプリと書き込み可能なインストール先が必要です。DMG から直接実行せず、先に「アプリケーション」へコピーしてください。
+
 DMG の公開ツールと署名資格情報は本 Repository に含めず、非公開のリリース環境で実行してください。
 
 ## プライバシーとセキュリティ
 
-スキャン、Render、サムネイル、再生、内容解析はローカルで行われます。「ダウンロード」に URL を明示的に貼り付けるかドロップした場合のみ、公開 HTTP/HTTPS 宛ての外向き通信を行います。ブラウザ Cookie、ログイン状態、独自認証は使用せず、DRM、ペイウォール、暗号化 HLS、ライブ HLS には対応しません。ページ解析は JavaScript を実行せず、最大 32 MB の HTML とインラインスクリプトから最大 16 件の `.m3u8` を抽出します。内蔵ストリームには source page 由来で query を除いた Referer／Origin だけを送ります。ブラウザ Cookie、ログイン、bot verification が必要なサイトの保護は回避せず、直接 `.m3u8` URL が必要です。localhost、プライベート IP、link-local などの非公開アドレスは各リクエストとリダイレクトで拒否します。単一ファイルは 4 GB に制限され、`~/Downloads/FastFileViewer` に保存されます。
+起動時と手動の更新確認時に GitHub の正式リリース情報を取得し、確認後にインストーラーをダウンロードします。ローカルファイル、フォルダのパス、アカウント認証情報は送信しません。
+
+スキャン、Render、サムネイル、再生、内容解析はローカルで行われます。「ダウンロード」に URL を明示的に貼り付けるかドロップすると、公開 HTTP/HTTPS 宛ての外向き通信を行います。ブラウザ Cookie、ログイン状態、独自認証は使用せず、DRM、ペイウォール、暗号化 HLS、ライブ HLS には対応しません。ページ解析は JavaScript を実行せず、最大 32 MB の HTML とインラインスクリプトから最大 16 件の `.m3u8` を抽出します。内蔵ストリームには source page 由来で query を除いた Referer／Origin だけを送ります。ブラウザ Cookie、ログイン、bot verification が必要なサイトの保護は回避せず、直接 `.m3u8` URL が必要です。localhost、プライベート IP、link-local などの非公開アドレスは各リクエストとリダイレクトで拒否します。単一ファイルは 4 GB に制限され、`~/Downloads/FastFileViewer` に保存されます。
 
 表示したコードや Markdown の生 HTML は実行されず、Markdown のリモートリソースも読み込みません。`.env*`、ローカルのリリース資産、パッケージ、個人ファイルをコミットしないでください。詳細は [SECURITY.md](SECURITY.md) を参照してください。
 

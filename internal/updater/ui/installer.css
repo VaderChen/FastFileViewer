@@ -1,0 +1,9 @@
+:root { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #26352d; background: #fbfcfa; }
+body { margin: 0; }
+main { padding: 22px 28px; text-align: center; }
+h1 { font-size: 18px; margin: 0 0 5px; }
+p { font-size: 13px; margin: 8px 0; }
+#version, #percent { color: #66736b; font-size: 12px; }
+progress { width: 100%; height: 12px; accent-color: #26745d; }
+button { padding: 7px 20px; border: 1px solid #cbd3cd; border-radius: 6px; color: #26352d; background: white; cursor: pointer; }
+[hidden] { display: none; }

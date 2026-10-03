@@ -1007,15 +1007,18 @@ func parseHLSPlaylist(content string, baseURL *url.URL) (hlsPlaylist, error) {
 		return hlsPlaylist{}, errors.New("invalid HLS playlist")
 	}
 	playlist := hlsPlaylist{}
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	scanner.Buffer(make([]byte, 64*1024), int(maxDownloadMetadataBytes))
 	variantPending := false
 	var variantBandwidth int64
 	var pendingRange string
 	var rangeOffset int64
 	var previousRangeURL string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// Metadata is already bounded and in memory; borrow each line instead of
+	// copying it through a Scanner buffer. Keep its original token-size limit.
+	for rawLine := range strings.SplitSeq(content, "\n") {
+		if len(rawLine) >= int(maxDownloadMetadataBytes) {
+			return hlsPlaylist{}, bufio.ErrTooLong
+		}
+		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			continue
 		}
@@ -1073,9 +1076,6 @@ func parseHLSPlaylist(content string, baseURL *url.URL) (hlsPlaylist, error) {
 			playlist.Segments = append(playlist.Segments, hlsSegment{URL: resolved, ByteRange: byteRange})
 			pendingRange = ""
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return hlsPlaylist{}, err
 	}
 	return playlist, nil
 }

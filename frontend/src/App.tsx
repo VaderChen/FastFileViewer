@@ -52,6 +52,9 @@ import { buildVisibleTree, collectImages, collectImageRefs, containsSelectedImag
 import { ScanQueue } from './scanQueue';
 import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize } from './downloads';
 import { useDownloads } from './useDownloads';
+import { useAppUpdates } from './useAppUpdates';
+import { AppUpdateDialog } from './AppUpdateDialog';
+import { updateMessages } from './appUpdates';
 import { useImageViewer } from './useImageViewer';
 import { extractErrorMessage, isOperationCancelled } from './operations';
 import { useWorkspace } from './useWorkspace';
@@ -882,6 +885,7 @@ export default function App() {
   };
 
   const t = messages[locale];
+  const appUpdates = useAppUpdates(locale);
   const pinnedDirectorySet = useMemo(() => new Set(pinnedDirectories), [pinnedDirectories]);
   const {
     viewerMode,
@@ -3328,12 +3332,17 @@ export default function App() {
                     </button>
                   </div>
                   <p className="about-license-notice">{t.noWarranty}</p>
+                  <button className="about-update-button" type="button" disabled={appUpdates.busy} onClick={appUpdates.check}>
+                    {appUpdates.state.phase === 'checking' ? updateMessages[locale].checking : updateMessages[locale].check}
+                  </button>
                 </div>
               )}
             </div>
           </section>
         </div>
       ) : null}
+      {appUpdates.visible ? <AppUpdateDialog state={appUpdates.state} locale={locale}
+        onInstall={appUpdates.install} onCancel={appUpdates.cancel} onClose={appUpdates.dismiss} /> : null}
       {contextMenu ? (
         <div
           className="context-menu"

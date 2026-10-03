@@ -144,16 +144,6 @@ export interface DelimitedTableSort {
 
 let tableCollator: Intl.Collator | undefined;
 
-function compareTableValues(left: string, right: string): number {
-  const leftNumber = Number(left);
-  const rightNumber = Number(right);
-  if (left.trim() !== '' && right.trim() !== '' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-    return leftNumber - rightNumber;
-  }
-  tableCollator ??= new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-  return tableCollator.compare(left, right);
-}
-
 export function selectDelimitedRows(dataRows: string[][], query: string, sort: DelimitedTableSort | null, rowLimit: number): ParsedDelimitedDocument {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = (row: string[]) => row.some((cell) => cell.toLocaleLowerCase().includes(normalizedQuery));
@@ -171,11 +161,43 @@ export function selectDelimitedRows(dataRows: string[][], query: string, sort: D
     return { rows, truncated: false };
   }
 
-  // Filtering already owns a new array; sorting it avoids a second full copy.
-  const rows = normalizedQuery ? dataRows.filter(matches) : [...dataRows];
-  rows.sort((left, right) => {
-    const comparison = compareTableValues(left[sort.column] ?? '', right[sort.column] ?? '');
+  const rows = normalizedQuery ? dataRows.filter(matches) : dataRows;
+  // An already ordered, entirely numeric column needs no sort workspace.
+  // Stop at the first nonnumeric or out-of-order value; mixed values still
+  // use the original pair-dependent numeric/locale comparator below.
+  let ordered = true;
+  let previousNumber = sort.direction === 'asc' ? -Infinity : Infinity;
+  for (const row of rows) {
+    const value = row[sort.column] ?? '';
+    const number = Number(value);
+    if (value.trim() === '' || !Number.isFinite(number)
+      || (sort.direction === 'asc' ? number < previousNumber : number > previousNumber)) {
+      ordered = false;
+      break;
+    }
+    previousNumber = number;
+  }
+  if (ordered) return { rows: rows.slice(0, rowLimit), truncated: rows.length > rowLimit };
+
+  // Cache numeric keys before sorting. Indices preserve the original rows
+  // without allocating a wrapper object for every record.
+  const numbers = new Float64Array(rows.length);
+  const order = new Array<number>(rows.length);
+  for (let index = 0; index < rows.length; index++) {
+    const value = rows[index][sort.column] ?? '';
+    const number = Number(value);
+    numbers[index] = value.trim() !== '' && Number.isFinite(number) ? number : NaN;
+    order[index] = index;
+  }
+  order.sort((left, right) => {
+    let comparison: number;
+    if (!Number.isNaN(numbers[left]) && !Number.isNaN(numbers[right])) {
+      comparison = numbers[left] - numbers[right];
+    } else {
+      tableCollator ??= new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      comparison = tableCollator.compare(rows[left][sort.column] ?? '', rows[right][sort.column] ?? '');
+    }
     return sort.direction === 'asc' ? comparison : -comparison;
   });
-  return { rows: rows.slice(0, rowLimit), truncated: rows.length > rowLimit };
+  return { rows: order.slice(0, rowLimit).map(index => rows[index]), truncated: rows.length > rowLimit };
 }

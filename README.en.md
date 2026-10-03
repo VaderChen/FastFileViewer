@@ -12,9 +12,9 @@
 
 ## Latest release
 
-[1.26.1003-r2](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003-r2) further reduces repeated work and temporary allocations in archive-tree construction, UTF-16 decoding, HLS segment downloads, audio visualization, subtitle selection, and code highlighting. It preserves the existing interface layout, controls, features, and authentication behavior. Apple Silicon and macOS 12 or later remain supported.
+[1.26.1003 build 2237](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1003-build-2237) adds startup update checks, **Check for Updates** in About, and automatic download, installation, and restart with progress. It also includes image/media information, camera RAW previews, and separate programming-language format settings, with further reductions in repeated work and allocations during scanning, HLS parsing, table sorting, and status polling. Requires Apple Silicon and macOS 12 or later; RAW camera compatibility depends on macOS.
 
-See the [changelog](CHANGELOG.md), [release notes](doc/release-v1.26.1003-r2.md), [function review](doc/function-optimization.md), and [benchmarks and measurement limits](doc/performance.md).
+See the [changelog](CHANGELOG.md), [release notes](doc/release-1.26.1003-build-2237.md), [function review](doc/function-optimization-followup.md), and [benchmarks and measurement limits](doc/performance.md).
 
 ## Features
 
@@ -80,9 +80,11 @@ The output is `dist/FastFileViewer.app`. The build runs Go and frontend verifica
 
 Prebuilt downloads are available from [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases).
 
+The app checks for a newer stable GitHub release at startup. You can also use **Settings → About → Check for Updates**. When an update is available, review its version and notes, then choose **Update and Restart**. Download progress appears in the app; an independent progress window stays open while the app closes, installs, and restarts. Downloads and preparation can be cancelled. The previous bundle is retained until the new UI starts, with rollback attempted on failure. Automatic installation requires an officially signed Apple Silicon app in a writable location; copy the app out of the DMG into Applications first.
+
 ## Privacy and Security
 
-Scanning, rendering, thumbnails, playback, and content analysis stay local. FastFileViewer only makes an outbound HTTP/HTTPS connection after the user explicitly pastes or drops a URL into Downloads. The downloader does not use browser cookies, login state, or custom credentials; it does not support DRM, paywalls, encrypted HLS, or live HLS. The page resolver does not execute JavaScript: it scans at most 32 MB of HTML and inline script text, returns at most 16 `.m3u8` candidates, and sends only a query-free Referer/Origin derived from the source page. Sites that require browser cookies, login, or anti-bot verification are not bypassed and require a direct `.m3u8` URL. Localhost, private, link-local, and other non-public network addresses are rejected on every request and redirect. Downloads are limited to 4 GB per file and are saved under `~/Downloads/FastFileViewer`.
+Scanning, rendering, thumbnails, playback, and content analysis stay local. Startup and manual update checks contact GitHub for public release metadata; installer downloads start only after confirmation. No local files, directory paths, or account credentials are sent. The Downloads feature connects to public HTTP/HTTPS URLs explicitly pasted or dropped by the user. The downloader does not use browser cookies, login state, or custom credentials; it does not support DRM, paywalls, encrypted HLS, or live HLS. The page resolver does not execute JavaScript: it scans at most 32 MB of HTML and inline script text, returns at most 16 `.m3u8` candidates, and sends only a query-free Referer/Origin derived from the source page. Sites that require browser cookies, login, or anti-bot verification are not bypassed and require a direct `.m3u8` URL. Localhost, private, link-local, and other non-public network addresses are rejected on every request and redirect. Downloads are limited to 4 GB per file and are saved under `~/Downloads/FastFileViewer`.
 
 FastFileViewer does not execute displayed source code or raw Markdown HTML and does not load remote Markdown resources. Do not commit `.env*`, packages, personal files, or unredacted debug data. See [SECURITY.md](SECURITY.md).
 

@@ -12,9 +12,9 @@
 
 ## 最新版本
 
-[1.26.1003-r2](https://github.com/VaderChen/FastFileViewer/releases/tag/v1.26.1003-r2) 進一步減少壓縮檔建樹、UTF-16 解碼、HLS 分段下載、音訊頻譜、字幕選擇及文件上色的重複計算與暫時記憶體配置。保留既有介面配置、操作、功能與認證方式；支援 Apple Silicon、macOS 12 以上。
+[1.26.1003 build 2237](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1003-build-2237) 加入啟動時自動偵測更新、關於頁面的「偵測更新」，以及包含進度的下載、安裝與重啟流程；同時提供圖片／影音資訊、相機 RAW 預覽與獨立的程式語言格式設定。目錄掃描、HLS 解析、表格排序與狀態輪詢進一步減少重複工作及記憶體配置。支援 Apple Silicon、macOS 12 以上；RAW 相機格式依 macOS 支援範圍而定。
 
-變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-v1.26.1003-r2.md)、[函式檢查報告](doc/function-optimization.md) 與[效能基準及量測限制](doc/performance.md)。
+變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-1.26.1003-build-2237.md)、[函式檢查報告](doc/function-optimization-followup.md) 與[效能基準及量測限制](doc/performance.md)。
 
 ## 功能
 
@@ -102,10 +102,13 @@ dist/FastFileViewer.app
 
 預先建置版本可由 [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) 取得。
 
+App 啟動時會自動偵測 GitHub 的正式新版；也可從「設定 → 關於 → 偵測更新」手動檢查。有新版時會顯示版本及更新說明，按「更新並重新啟動」後會下載並顯示進度，自動關閉 App、安裝及重新開啟。下載及準備期間可取消；開始替換後由獨立視窗顯示安裝進度。原版本會保留至新版畫面啟動完成，失敗時嘗試還原。自動更新需使用正式簽署的 Apple Silicon App，並安裝在目前帳號可寫入的位置；從 DMG 直接執行時請先拖入「應用程式」。
+
 ## 資料與隱私
 
 - 檔案掃描、Render、縮圖、媒體播放與內容分析均在本機完成。
-- 只有使用者在「下載項目」明確貼上或拖入網址時，App 才會對該公開 HTTP/HTTPS 位址建立連出連線。
+- 啟動及手動偵測更新時，App 會連線至 GitHub 查詢正式發行資訊；確認更新後才下載安裝包，不傳送本機檔案、目錄或帳號憑證。
+- 使用者在「下載項目」明確貼上或拖入網址時，下載器會對該公開 HTTP/HTTPS 位址建立連出連線。
 - 下載器不使用瀏覽器 Cookie、登入狀態或自訂認證，不支援 DRM、付費牆、加密 HLS 或即時 HLS。
 - 網頁解析器不執行 JavaScript，只檢查最多 32 MB 的 HTML 與內嵌腳本文字；最多列出 16 個 `.m3u8` 候選。
 - 需要瀏覽器 Cookie、登入或反機器人驗證的網站不會繞過保護，介面會提示改貼直接 `.m3u8` 網址。

@@ -1,5 +1,3 @@
-# FastFileViewer v1.26.1003-r2
-
 This revision reduces repeated work and temporary memory allocations across the app while preserving the existing interface, controls, features, and authentication behavior.
 
 ## Improvements

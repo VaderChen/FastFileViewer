@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/VaderChen/FastFileViewer/internal/app"
+	"github.com/VaderChen/FastFileViewer/internal/updater"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -19,10 +20,16 @@ import (
 var assets embed.FS
 
 func main() {
+	if handled, err := updater.RunInstaller(os.Args[1:]); handled {
+		if err != nil {
+			log.Print(err)
+		}
+		return
+	}
 	services := app.New()
 	// 直接由 Finder／`open` 傳入檔案時，macOS 會將路徑放在 argv；
 	// 先排入佇列可讓前端完成第一幀後立即開啟，不必等待 OnFileOpen Apple Event。
-	for _, argument := range os.Args[1:] {
+	for _, argument := range updater.FileArguments(os.Args[1:]) {
 		if strings.TrimSpace(argument) == "" || strings.HasPrefix(argument, "-") {
 			continue
 		}
@@ -50,6 +57,7 @@ func main() {
 			services.Media,
 			services.Download,
 			services.File,
+			services.Update,
 		},
 	})
 	if err != nil {

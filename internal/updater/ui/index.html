@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wails:; img-src 'self' data:">
+  <title>FastFileViewer</title>
+  <link rel="stylesheet" href="/installer.css">
+</head>
+<body>
+  <main aria-labelledby="title">
+    <h1 id="title">FastFileViewer</h1>
+    <p id="version"></p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <progress id="progress" max="100" value="80" aria-labelledby="status"></progress>
+    <p id="percent">80%</p>
+    <button id="close" type="button" hidden>Close</button>
+  </main>
+  <script type="module" src="/installer.js"></script>
+</body>
+</html>

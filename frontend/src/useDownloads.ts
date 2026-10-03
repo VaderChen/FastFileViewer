@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, DragEvent } from 'react';
 import type { DownloadItem, DownloadResolution } from './types';
-import { extractDownloadURLs, shouldResolveDownloadPage } from './downloads';
+import { extractDownloadURLs, reconcileDownloads, shouldResolveDownloadPage } from './downloads';
 import { extractErrorMessage } from './operations';
 
 interface UseDownloadsOptions {
@@ -42,7 +42,9 @@ export function useDownloads({ panelVisible, operationFailedLabel, onError }: Us
     const generation = lifecycleRef.current.generation;
     const request = (async () => {
       const items = await downloadService()?.ListDownloads?.();
-      if (items && isCurrent(generation) && sequence === refreshSequenceRef.current) setDownloads(items);
+      if (items && isCurrent(generation) && sequence === refreshSequenceRef.current) {
+        setDownloads(previous => reconcileDownloads(previous, items));
+      }
     })().finally(() => {
       if (refreshRef.current === request) refreshRef.current = null;
     });

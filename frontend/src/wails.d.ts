@@ -1,9 +1,11 @@
 import type { AppInfo, BootstrapPayload, DirectoryScanResult, DocumentPayload, DownloadItem, DownloadResolution, DuplicateGroup, ExportResult, ImageEntry, ImageMetadata, ImagePayload, MediaMetadata, MoveResult, TrashResult } from './types';
+import type { AppUpdateAPI } from './appUpdates';
 
 declare global {
   interface Window {
     go?: {
       app?: {
+        UpdateService?: AppUpdateAPI;
         // App 是圖庫服務：掃描、縮圖、文件與可取消操作。
         App?: {
           Bootstrap: () => Promise<BootstrapPayload>;

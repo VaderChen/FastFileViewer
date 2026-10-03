@@ -1,3 +1,19 @@
+import type { DownloadItem } from './types';
+
+// Keep the existing state identity when a bridge poll contains no changes.
+export function reconcileDownloads(previous: DownloadItem[], next: DownloadItem[]): DownloadItem[] {
+  if (previous === next) return previous;
+  if (previous.length !== next.length) return next;
+  for (let index = 0; index < previous.length; index++) {
+    const a = previous[index], b = next[index];
+    if (a.id !== b.id || a.url !== b.url || a.name !== b.name || a.path !== b.path
+      || a.status !== b.status || a.contentType !== b.contentType || a.bytes !== b.bytes
+      || a.totalBytes !== b.totalBytes || a.error !== b.error || a.createdAt !== b.createdAt
+      || a.completedAt !== b.completedAt) return next;
+  }
+  return previous;
+}
+
 // 下載網址解析與顯示用的純函式，與 React 狀態無關，方便單獨測試。
 
 export function extractDownloadURLs(value: string): string[] {

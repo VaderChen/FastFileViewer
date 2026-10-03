@@ -1,0 +1,28 @@
+.app-update-overlay {
+  position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(18, 22, 20, 0.4);
+}
+.app-update-dialog {
+  width: min(520px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto;
+  padding: 24px; border: 1px solid #cbd3cd; border-radius: 10px; background: #fbfcfa; color: #26352d;
+  box-shadow: 0 18px 44px rgba(25, 32, 28, 0.22); outline: none; font-size: 13px;
+}
+.app-update-dialog h2 { margin: 0 0 16px; font-size: 18px; }
+.app-update-dialog p { margin: 12px 0; line-height: 1.6; }
+.app-update-dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
+.app-update-dialog dt { color: #66736b; }
+.app-update-dialog dd { margin: 0; overflow-wrap: anywhere; }
+.app-update-notes {
+  max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  border: 1px solid #d8e0da; background: #f7f9f7; border-radius: 6px; padding: 12px; font: inherit; line-height: 1.6;
+}
+.app-update-error { color: #8a392c; }
+.app-update-dialog progress { width: 100%; height: 12px; accent-color: #26745d; }
+.app-update-progress { display: block; margin-top: 8px; color: #66736b; font-variant-numeric: tabular-nums; }
+.app-update-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.app-update-actions button, .about-update-button {
+  padding: 8px 14px; border: 1px solid #cbd3cd; border-radius: 6px; background: #fff; color: #26352d; cursor: pointer;
+}
+.app-update-actions .app-update-primary { color: #fff; background: #26745d; border-color: #26745d; }
+.about-update-button { justify-self: start; margin-top: 4px; }
+.about-update-button:disabled { opacity: 0.6; cursor: default; }

@@ -12,13 +12,14 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - 大型內容樹與縮圖使用本機磁碟快取；圖片使用容量受限 LRU 與相鄰預載。
 - 掃描、Render、快取與內容分析完全在本機進行，不執行程式碼或 Markdown 原始 HTML。
 - 本機影音採可跳轉串流，壓縮檔影音使用生命週期受控的暫存檔。
-- MKV 在偵測到本機 `ffmpeg` 時，優先轉封裝並在必要時使用 VideoToolbox 轉碼成暫存 MP4。
+- MKV 透過內建 LGPL `ffmpeg` 優先轉封裝，並在必要時使用 VideoToolbox 轉碼成暫存 MP4；開發模式沒有 Bundle 時使用本機 `ffmpeg`。
 - 音樂播放器透過 Web Audio API 的 `AnalyserNode` 繪製即時頻譜與波形，暫停時停止動畫更新；頻譜使用 32768-point floating-decibel FFT，以 72 個對數中心頻率線性插值，目標涵蓋 10 Hz–20 kHz，並受來源取樣率的 Nyquist 上限約束。波形依畫布寬度降採樣至最多 1,600 點。
 - MP2／MP3、M4A／M4B、WAV、AAC、FLAC、OGG／OPUS、AIFF 與 CAF 優先原生播放；FLAC 等原生解碼失敗時自動要求相容 M4A。
 - WMA、APE、WavPack、獨立 ALAC、AC-3、AMR 與 MKA 直接透過本機 `ffmpeg` 轉為 256 kbps AAC M4A 暫存檔；MKV 先嘗試改封裝，失敗時才使用 VideoToolbox 轉碼。
 - MKV 改封裝完成後，使用者可選擇把可播放檔保存至原資料夾並將原檔移至垃圾桶；取消時維持原檔與暫存播放流程。
 - 自動配對同目錄 sidecar 字幕，並轉換常見文字字幕格式供播放器顯示。
 - 「下載項目」只對使用者明確貼上或拖入的公開 HTTP/HTTPS URL 建立連出連線，包含未加密且已結束的 HLS VOD。
+- App 啟動時自動查詢 GitHub 正式新版，關於頁面提供手動偵測；使用者確認後下載並自動安裝、重啟，全程顯示進度。
 
 ## 專案身分
 
@@ -50,6 +51,8 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 - `internal/app/metadata.go`：圖片尺寸／EXIF、影音 ffprobe metadata，以及 macOS 原生 RAW 轉換預覽。
 - `assets/file-icons/`：Finder 檔案關聯的預設分類圖示樣式；`FASTFILEVIEWER_FILE_ICON_STYLE` 控制 `build.command` 選用的樣式。
 - `internal/app/download.go`：安全 URL 驗證、下載佇列、進度、持久化及 HLS VOD 合併。
+- `internal/app/update.go`：更新偵測、下載／準備狀態、取消與應用程式生命週期。
+- `internal/updater`：GitHub 正式版本比較、串流下載、安裝包驗證及獨立安裝視窗；`frontend/src/useAppUpdates.ts`、`AppUpdateDialog.tsx` 管理 App 內的更新流程。
 - `internal/app/types.go`：前後端資料模型。
 - `frontend/src/App.tsx`：內容樹、Viewer、工作區、設定與 About 授權資訊。
 - 文件配色預設為 `GitHub Light`，使用者選擇透過 `localStorage` 持久化。
@@ -70,11 +73,13 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 
 ## 後端服務與 API
 
-Wails 綁定三個服務，避免圖庫、媒體與下載佇列共用同一組生命週期狀態：
+Wails 綁定五個服務，各自管理對應功能的生命週期狀態：
 
 - `Library`（`App`）：目錄掃描、快取、文件／圖片載入、匯出、Checksum、重複偵測及可取消操作。
 - `Media`（`MediaService`）：媒體註冊、Range 播放、壓縮檔媒體暫存、`ffmpeg` 相容轉換及播放快取清理。
 - `Download`（`DownloadService`）：公開 URL 驗證、下載佇列、HLS VOD、持久化歷史與 Finder 操作。
+- `File`（`FileService`）：重新命名、搬移、移至垃圾桶及檔案操作確認。
+- `Update`（`UpdateService`）：版本偵測、下載／準備、取消與安裝交接。`GetUpdateProgress` 回傳精簡進度；`GetUpdateState` 保留完整發行資訊，供標籤變動時取得說明。前端只在內容有變化時替換狀態，詳細量測見[再次函式檢查](function-optimization-followup.md)。
 
 `main.go` 由 `app.New()` 建立服務集合，透過 `Services.Startup`／`Services.Shutdown` 將同一個應用程式 context 傳給各服務，並以 `NewMediaMiddleware` 將受控媒體路由掛到 Wails asset server。
 
@@ -146,11 +151,15 @@ Wails 綁定三個服務，避免圖庫、媒體與下載佇列共用同一組�
 ./build.sh
 ```
 
+後續版本統一使用 `1.YY.MMDD build HHmm`，例如 `1.26.1003 build 2059`。日期與時間取同一次建置開始時的本地時間，`HHmm` 使用 24 小時制並保留前導零；App About、前端版本與 `build-metadata.json` 的 `version` 都使用完整顯示格式。
+
+Git tag 使用不含空白的 `1.YY.MMDD-build-HHmm`，例如 `1.26.1003-build-2059`。macOS 的數字版本欄位維持 `1.YY.MMDD` 與 `1.YY.MMDD.HHmm`。正式發行時固定同一組日期、時間與 tag，詳見[發行規範](release.md)。
+
 可覆寫參數：
 
 ```bash
-APP_MARKETING_VERSION=1.26.0824 \
-APP_BUILD_LABEL=1200 \
+APP_MARKETING_VERSION=1.26.1003 \
+APP_BUILD_LABEL=2059 \
 APP_BUNDLE_ID=com.example.fastfileviewer \
 BUILD_SOURCE_URL=https://github.com/example/FastFileViewer \
 ./build.sh

@@ -21,8 +21,9 @@ export CGO_LDFLAGS="-mmacosx-version-min=12.0"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 APP_BUNDLE_ID="${APP_BUNDLE_ID:-com.vader.fastfileviewer}"
 BUILD_SOURCE_URL="${BUILD_SOURCE_URL:-https://github.com/VaderChen/FastFileViewer}"
-APP_MARKETING_VERSION="${APP_MARKETING_VERSION:-1.$(date +%y).$(date +%m%d)}"
-APP_BUILD_LABEL="${APP_BUILD_LABEL:-$(date +%H%M)}"
+APP_BUILD_TIMESTAMP="$(date '+1.%y.%m%d %H%M')"
+APP_MARKETING_VERSION="${APP_MARKETING_VERSION:-${APP_BUILD_TIMESTAMP% *}}"
+APP_BUILD_LABEL="${APP_BUILD_LABEL:-${APP_BUILD_TIMESTAMP##* }}"
 APP_DISPLAY_VERSION="$APP_MARKETING_VERSION build $APP_BUILD_LABEL"
 APP_BUNDLE_VERSION="${APP_BUNDLE_VERSION:-$APP_MARKETING_VERSION.$APP_BUILD_LABEL}"
 
@@ -38,6 +39,10 @@ fi
 
 if [[ ! "$APP_MARKETING_VERSION" =~ '^[0-9]+([.][0-9]+)*$' ]]; then
   echo "APP_MARKETING_VERSION 格式錯誤：$APP_MARKETING_VERSION"
+  exit 1
+fi
+if [[ ! "$APP_BUILD_LABEL" =~ '^([01][0-9]|2[0-3])[0-5][0-9]$' ]]; then
+  echo "APP_BUILD_LABEL 必須為 24 小時制 HHmm：$APP_BUILD_LABEL"
   exit 1
 fi
 if [[ ! "$APP_BUNDLE_VERSION" =~ '^[0-9]+([.][0-9]+)*$' ]]; then
@@ -215,7 +220,7 @@ for metadata_value in "$BUILD_COMMIT" "$BUILD_TAG" "$BUILD_STATE" "$BUILD_SOURCE
   fi
 done
 
-BUILD_LDFLAGS="-X github.com/VaderChen/FastFileViewer/internal/app.appVersion=$APP_MARKETING_VERSION -X github.com/VaderChen/FastFileViewer/internal/app.appCommit=$BUILD_COMMIT -X github.com/VaderChen/FastFileViewer/internal/app.appTag=$BUILD_TAG -X github.com/VaderChen/FastFileViewer/internal/app.appBuildState=$BUILD_STATE -X github.com/VaderChen/FastFileViewer/internal/app.appSourceURL=$BUILD_SOURCE_URL"
+BUILD_LDFLAGS="-X 'github.com/VaderChen/FastFileViewer/internal/app.appVersion=$APP_DISPLAY_VERSION' -X github.com/VaderChen/FastFileViewer/internal/app.appCommit=$BUILD_COMMIT -X github.com/VaderChen/FastFileViewer/internal/app.appTag=$BUILD_TAG -X github.com/VaderChen/FastFileViewer/internal/app.appBuildState=$BUILD_STATE -X github.com/VaderChen/FastFileViewer/internal/app.appSourceURL=$BUILD_SOURCE_URL"
 
 validate_bundled_ffmpeg
 node "$SCRIPT_DIR/scripts/check-macos-target.mjs" \
@@ -253,7 +258,7 @@ cp "$SCRIPT_DIR/THIRD-PARTY-NOTICES.md" "$APP_LICENSE_DIR/THIRD-PARTY-NOTICES.md
 cp "$SCRIPT_DIR/THIRD-PARTY-LICENSES.txt" "$APP_LICENSE_DIR/THIRD-PARTY-LICENSES.txt"
 node "$SCRIPT_DIR/scripts/write-build-metadata.mjs" \
   "$BUILD_APP_PATH/Contents/Resources/build-metadata.json" \
-  "$APP_MARKETING_VERSION" "$BUILD_COMMIT" "$BUILD_TAG" "$BUILD_STATE" "$BUILD_SOURCE_URL"
+  "$APP_DISPLAY_VERSION" "$BUILD_COMMIT" "$BUILD_TAG" "$BUILD_STATE" "$BUILD_SOURCE_URL"
 
 prepare_bundled_ffmpeg
 

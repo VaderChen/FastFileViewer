@@ -4,6 +4,49 @@ import { flush, globalValue, hookHarness, loadSource } from './helpers/hookHarne
 import { decodeImageURL } from '../src/imageTransport.ts';
 import { clearThumbnailCache, readThumbnail, requestThumbnail, storeThumbnail } from '../src/thumbnailCache.ts';
 
+test('unchanged download snapshots retain state and every visible field still updates', async () => {
+  const { reconcileDownloads } = await import('../src/downloads.ts');
+  const item = { id: 'one', url: 'https://example.test/one.png', name: 'one.png', path: '/downloads/one.png',
+    status: 'downloading' as const, contentType: 'image/png', bytes: 5, totalBytes: 10,
+    error: '', createdAt: 1, completedAt: 0 };
+  const previous = [item];
+  assert.equal(reconcileDownloads(previous, [{ ...item }]), previous);
+  assert.equal(reconcileDownloads(previous, previous), previous);
+  const empty: typeof previous = [];
+  assert.equal(reconcileDownloads(empty, []), empty);
+  for (const [field, value] of Object.entries(item)) {
+    const next = [{ ...item, [field]: typeof value === 'number' ? value + 1 : value + '-changed' }];
+    assert.equal(reconcileDownloads(previous, next), next, field);
+  }
+  for (const field of ['error', 'completedAt'] as const) {
+    const next = [{ ...item }]; delete next[0][field];
+    assert.equal(reconcileDownloads(previous, next), next, field);
+  }
+  const second = { ...item, id: 'two' };
+  for (const next of [[], [second, item], [item, second]]) assert.equal(reconcileDownloads(previous, next), next);
+  const ordered = [item, second], reordered = [second, item];
+  assert.equal(reconcileDownloads(ordered, reordered), reordered);
+});
+
+test('download polling keeps unchanged state identity without delaying progress or removal', async () => {
+  let backend = [{ id: 'one', url: 'https://example.test/one.png', name: 'one.png', path: '',
+    status: 'downloading', contentType: 'image/png', bytes: 5, totalBytes: 10, createdAt: 1 }];
+  const fixture = downloadsFixture({ ListDownloads: async () => structuredClone(backend) });
+  let stopPoll: (() => void) | undefined;
+  try {
+    await flush();
+    const initial = fixture.render().downloads;
+    stopPoll = fixture.harness.effects.find(effect => effect.deps.length === 2)!.run() as () => void;
+    const poll = fixture.intervals.values().next().value!;
+    for (let index = 0; index < 5; index++) { poll(); await flush(); assert.equal(fixture.render().downloads, initial); }
+    backend[0].bytes = 9; poll(); await flush();
+    const changed = fixture.render().downloads;
+    assert.notEqual(changed, initial); assert.equal(changed[0].bytes, 9); assert.equal(initial[0].bytes, 5);
+    backend = []; poll(); await flush(); assert.deepEqual(fixture.render().downloads, []);
+  } finally { stopPoll?.(); fixture.unmount(); fixture.restore(); }
+});
+
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;

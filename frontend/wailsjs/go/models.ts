@@ -475,6 +475,93 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class UpdateProgress {
+	    phase: string;
+	    currentVersion: string;
+	    releaseTag: string;
+	    bytes: number;
+	    error: string;
+	    installError: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.phase = source["phase"];
+	        this.currentVersion = source["currentVersion"];
+	        this.releaseTag = source["releaseTag"];
+	        this.bytes = source["bytes"];
+	        this.error = source["error"];
+	        this.installError = source["installError"];
+	    }
+	}
+	export class UpdateState {
+	    phase: string;
+	    currentVersion: string;
+	    release?: updater.Release;
+	    bytes: number;
+	    error: string;
+	    installError: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.phase = source["phase"];
+	        this.currentVersion = source["currentVersion"];
+	        this.release = this.convertValues(source["release"], updater.Release);
+	        this.bytes = source["bytes"];
+	        this.error = source["error"];
+	        this.installError = source["installError"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace updater {
+	
+	export class Release {
+	    tag: string;
+	    version: string;
+	    notes: string;
+	    url: string;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Release(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tag = source["tag"];
+	        this.version = source["version"];
+	        this.notes = source["notes"];
+	        this.url = source["url"];
+	        this.size = source["size"];
+	    }
+	}
 
 }
 

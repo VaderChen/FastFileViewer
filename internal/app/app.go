@@ -196,6 +196,7 @@ type Services struct {
 	Media    *MediaService
 	Download *DownloadService
 	File     *FileService
+	Update   *UpdateService
 }
 
 // New 會建立互相串接好的服務集合。
@@ -208,6 +209,7 @@ func New() *Services {
 		Media:    media,
 		Download: newDownloadService(),
 		File:     newFileService(entries),
+		Update:   newUpdateService(),
 	}
 }
 
@@ -217,10 +219,12 @@ func (s *Services) Startup(ctx context.Context) {
 	s.Media.Startup(ctx)
 	s.Download.Startup(ctx)
 	s.File.Startup(ctx)
+	s.Update.startup(ctx)
 }
 
 // Shutdown 會釋放各服務持有的暫存資源。
 func (s *Services) Shutdown() {
+	s.Update.cleanup()
 	s.Library.operations.close()
 	s.Download.cleanup()
 	s.Media.cleanup()
@@ -673,17 +677,18 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 		if shouldIgnoreEntryName(entry.Name()) {
 			continue
 		}
-		childPath := filepath.Join(absPath, entry.Name())
 		if entry.IsDir() {
-			node.Children = append(node.Children, buildDirectoryNode(childPath, false))
+			node.Children = append(node.Children, buildDirectoryNode(filepath.Join(absPath, entry.Name()), false))
 			continue
 		}
 
-		extension := normalizedExtension(childPath)
+		// Unsupported files need neither a full path allocation nor a stat.
+		extension := normalizedExtension(entry.Name())
 		isContent := isEnabledExtension(extension, imageExtensionFilter) || isEnabledExtension(extension, documentExtensionFilter) || isEnabledExtension(extension, mediaExtensionFilter)
 		if !isContent && !isSupportedArchive(extension) {
 			continue
 		}
+		childPath := filepath.Join(absPath, entry.Name())
 		info, err := entry.Info()
 		if err == nil && info.Mode()&os.ModeSymlink != 0 {
 			// 檔案連結使用目標大小；不遞迴目錄連結，也不列出 FIFO／裝置。

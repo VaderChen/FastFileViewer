@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.26.1003 build 2237 — 2026-10-03
 
 ### Metadata and camera RAW support
 
@@ -9,6 +9,18 @@
 - Added common camera RAW extensions with macOS ImageIO／`sips` conversion for preview when the operating system supports the camera model.
 - Expanded RAW filename detection to additional vendor formats including CRW, SRW, ERF, MRW, GPR, R3D, FFF, BAY, CAP, PTX, and PXN.
 - Added selectable Finder association icon styles (`classic`, `monochrome`, and `vivid`) with separate document, image, media/subtitle, and archive icons.
+- Separated programming-language formats from document formats in Settings while preserving saved format selections.
+
+### Performance and updates
+
+- Avoid full-path allocations for unsupported files during scans and parse in-memory HLS playlists without a Scanner buffer or per-line copies.
+- Reuse unchanged download/update state, transfer compact update progress without repeating release notes, and retain existing cancellation and stale-response handling.
+- Precompute numeric table-sort keys and bypass sorting for already ordered numeric columns while preserving stable numeric/locale comparison behavior.
+- Add comparative function benchmarks and regression coverage for scan results, HLS boundaries, table ordering, and update polling.
+- Check GitHub for a newer stable release at startup and from the About page.
+- Show an update confirmation dialog, download progress, and an independent installation progress window while the app closes and restarts.
+- Verify package size, SHA-256, macOS compatibility, release metadata, and the installed publisher's code-signing identity before replacing the app; retain the previous bundle until the new UI starts and attempt rollback on failure.
+- Support both legacy revision tags and the `1.YY.MMDD-build-HHmm` release format.
 
 ## 1.26.1003-r2 — 2026-10-03
 
