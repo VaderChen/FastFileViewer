@@ -42,7 +42,7 @@
 
 ## 開発とビルド
 
-必要環境は Apple Silicon Mac、macOS 12 以降、Go 1.26.4、Node.js、npm、Xcode Command Line Tools、`rsync`、`pkg-config`、libopus、libvpx です。内蔵 LGPL FFmpeg のビルドには `brew install pkg-config opus libvpx` を使用できます。
+必要環境は Apple Silicon Mac、macOS 12 以降、Go 1.26.6、Node.js、npm、Xcode Command Line Tools、`pkg-config`、libopus、libvpx です。内蔵 LGPL FFmpeg のビルドには `brew install pkg-config opus libvpx` を使用できます。
 
 ```bash
 git clone https://github.com/VaderChen/FastFileViewer.git
@@ -55,7 +55,7 @@ cd FastFileViewer
 ./build.sh
 ```
 
-出力は `dist/FastFileViewer.app` です。ビルド時に GPLv3、第三者ライセンス全文、通知、Git のビルドメタデータを App Bundle の `Contents/Resources` に含めます。
+出力は `dist/FastFileViewer.app` です。ビルド時にプロジェクトのライセンス、第三者ライセンス全文、通知、Git のビルドメタデータを App Bundle の `Contents/Resources` に含めます。
 
 ビルド済みファイルは [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases) から取得できます。
 

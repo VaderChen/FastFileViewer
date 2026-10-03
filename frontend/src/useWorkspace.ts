@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DuplicateGroup, ImageEntry } from './types';
+import type { DuplicateGroup, ImageEntry, FileOperationFailure } from './types';
 import { filterWorkspaceEntries } from './workspaceFilters';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
 import { extractErrorMessage, isOperationCancelled } from './operations';
@@ -50,12 +50,14 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
   const [message, setMessage] = useState('');
   const [displayLimit, setDisplayLimit] = useState(workspacePageSize);
   const [loadTarget, setLoadTarget] = useState<number | null>(null);
-  const operationRef = useRef<number | null>(null);
+  const operationRef = useRef<{ id: number; cancelled: boolean } | null>(null);
 
   const filteredImages = useMemo(
     () => filterWorkspaceEntries(libraryImages, query, kindFilter, sourceFilter),
     [libraryImages, kindFilter, query, sourceFilter],
   );
+  const filteredImagesRef = useRef(filteredImages);
+  filteredImagesRef.current = filteredImages;
   const displayedImages = useMemo(
     () => filteredImages.slice(0, displayLimit),
     [filteredImages, displayLimit],
@@ -73,12 +75,19 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
 
   useEffect(() => {
     setDuplicateGroups([]);
+  }, [filteredImages]);
+
+  useEffect(() => {
     setDisplayLimit(workspacePageSize);
     setLoadTarget(null);
   }, [kindFilter, query, sourceFilter]);
 
   useEffect(() => {
     if (loadTarget === null) {
+      return;
+    }
+    if (loadTarget > filteredImages.length) {
+      setLoadTarget(filteredImages.length);
       return;
     }
     if (displayLimit >= loadTarget) {
@@ -89,7 +98,7 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
       setDisplayLimit((current) => Math.min(loadTarget, current + workspacePageSize));
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [displayLimit, loadTarget]);
+  }, [displayLimit, filteredImages.length, loadTarget]);
 
   const toggleImage = (imageId: string, options?: { toggle?: boolean; range?: boolean }) => {
     setSelectedIds((current) => {
@@ -140,26 +149,49 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
     setLoadTarget(null);
   };
 
-  // runOperation 統一處理忙碌旗標、操作編號與取消後不覆寫訊息的規則。
-  const runOperation = async (task: (operationId: number) => Promise<string>) => {
+  // 先保留操作身分，再向後端取得編號，避免快速點擊或等待編號時的取消遺失。
+  const runOperation = async (task: (operationId: number, isCurrent: () => boolean) => Promise<string>) => {
+    if (operationRef.current) return;
+    const operation = { id: 0, cancelled: false };
+    operationRef.current = operation;
+    const service = libraryService();
+    const isCurrent = () => operationRef.current === operation && !operation.cancelled;
     setBusy(true);
     setMessage('');
     try {
-      const operationId = await libraryService()?.BeginOperation?.() ?? 0;
-      operationRef.current = operationId;
-      const result = await task(operationId);
-      if (result) {
+      operation.id = await service?.BeginOperation?.() ?? 0;
+      if (!isCurrent()) {
+        if (operation.id) await service?.CancelOperation?.(operation.id);
+        return;
+      }
+      const result = await task(operation.id, isCurrent);
+      if (result && isCurrent()) {
         setMessage(result);
       }
     } catch (error) {
-      if (!isOperationCancelled(error)) {
+      if (isCurrent() && !isOperationCancelled(error)) {
         setMessage(extractErrorMessage(error, labels.operationFailed));
       }
     } finally {
-      operationRef.current = null;
-      setBusy(false);
+      if (operation.id) {
+        try { await service?.FinishOperation?.(operation.id); } catch { /* Preserve the original operation result. */ }
+      }
+      if (operationRef.current === operation) {
+        operationRef.current = null;
+        setBusy(false);
+      }
     }
   };
+
+  useEffect(() => () => {
+    const operation = operationRef.current;
+    if (!operation) return;
+    operation.cancelled = true;
+    operationRef.current = null;
+    if (operation.id) {
+      void libraryService()?.CancelOperation?.(operation.id).catch(() => undefined);
+    }
+  }, []);
 
   const exportSelected = async () => {
     if (selectedImages.length === 0) {
@@ -175,8 +207,9 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
     if (filteredImages.length === 0) {
       return;
     }
-    await runOperation(async (operationId) => {
+    await runOperation(async (operationId, isCurrent) => {
       const groups = await libraryService()?.DetectDuplicates?.(filteredImages, operationId);
+      if (!isCurrent() || filteredImagesRef.current !== filteredImages) return '';
       setDuplicateGroups(groups ?? []);
       return groups && groups.length > 0 ? '' : labels.noDuplicates;
     });
@@ -197,21 +230,21 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
         onEntriesRemoved?.(ids);
         setSelectedIds((current) => new Set(Array.from(current).filter((id) => !ids.includes(id))));
       }
-      return labels.trashSelected ? `${labels.trashSelected}: ${ids.length}` : '';
+      return operationSummary(labels.trashSelected ? `${labels.trashSelected}: ${ids.length}` : '', result?.failed);
     });
   };
 
   const moveSelected = async () => {
     if (selectedImages.length === 0) return;
-    const destination = await fileService()?.SelectMoveDestination?.(labels.chooseMoveDestination ?? '選擇移動目的地');
-    if (!destination) return;
-    await runOperation(async () => {
+    await runOperation(async (_operationId, isCurrent) => {
+      const destination = await fileService()?.SelectMoveDestination?.(labels.chooseMoveDestination ?? '選擇移動目的地');
+      if (!destination || !isCurrent()) return '';
       const result = await fileService()?.MoveEntries?.(selectedImages.map((image) => image.path), destination);
       for (const moved of result?.moved ?? []) {
-        const original = selectedImages.find((image) => image.name === moved.name);
-        if (original) onEntryMoved?.(original.id, moved);
+        const originalId = result?.originalIds[moved.id];
+        if (originalId) onEntryMoved?.(originalId, moved);
       }
-      return result?.moved?.length && labels.movedSummary ? `${labels.movedSummary}: ${result.moved.length}` : '';
+      return operationSummary(result?.moved?.length && labels.movedSummary ? `${labels.movedSummary}: ${result.moved.length}` : '', result?.failed);
     });
   };
 
@@ -229,13 +262,16 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
       const ids = result?.removedIds ?? [];
       if (ids.length) onEntriesRemoved?.(ids);
       setDuplicateGroups((groups) => groups.map((item) => item === group ? { ...item, images: item.images.filter((image) => !ids.includes(image.id)) } : item).filter((item) => item.images.length > 1));
-      return labels.trashSelected ? `${labels.trashSelected}: ${ids.length}` : '';
+      return operationSummary(labels.trashSelected ? `${labels.trashSelected}: ${ids.length}` : '', result?.failed);
     });
   };
 
   const cancelOperation = () => {
-    if (operationRef.current !== null) {
-      void libraryService()?.CancelOperation?.(operationRef.current);
+    const operation = operationRef.current;
+    if (!operation) return;
+    operation.cancelled = true;
+    if (operation.id) {
+      void libraryService()?.CancelOperation?.(operation.id).catch(() => undefined);
     }
   };
 
@@ -271,4 +307,8 @@ export function useWorkspace({ libraryImages, labels, onEntriesRemoved, onEntryM
     trashDuplicateGroup,
     cancelOperation,
   };
+}
+
+function operationSummary(summary: string, failures: FileOperationFailure[] = []): string {
+  return [summary, ...failures.map((failure) => failure.path + ': ' + failure.error)].filter(Boolean).join('\n');
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -19,7 +20,7 @@ type FileService struct {
 	entries *entryRegistry
 }
 
-var renameFile = os.Rename
+var renameFile = renameNoReplace
 
 func newFileService(entries *entryRegistry) *FileService {
 	return &FileService{entries: entries}
@@ -44,20 +45,20 @@ func (s *FileService) RenameEntry(filePath string, newName string) (ImageEntry, 
 		return ImageEntry{}, errors.New("新檔名不可包含路徑")
 	}
 	targetPath := filepath.Join(entry.DirectoryPath, newName)
-	if _, statErr := os.Stat(targetPath); statErr == nil {
+	if _, statErr := os.Lstat(targetPath); statErr == nil {
 		return ImageEntry{}, errors.New("目標檔案已存在")
 	} else if !os.IsNotExist(statErr) {
 		return ImageEntry{}, statErr
 	}
-	if err := renameFile(entry.Path, targetPath); err != nil {
+	if err := moveFileNoReplace(entry.Path, targetPath); err != nil {
 		return ImageEntry{}, fmt.Errorf("改名失敗: %w", err)
 	}
-	info, err := os.Stat(targetPath)
+	info, err := movedFileInfo(targetPath)
 	if err != nil {
 		return ImageEntry{}, fmt.Errorf("讀取改名後檔案失敗: %w", err)
 	}
 	replacement := buildFileImageEntry(targetPath, info.Size())
-	s.entries.remember(replacement)
+	s.entries.replace(entry.ID, replacement)
 	return replacement, nil
 }
 
@@ -88,6 +89,7 @@ func (s *FileService) TrashEntries(filePaths []string) (TrashResult, error) {
 			result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: fmt.Sprintf("移到垃圾桶失敗: %v", err)})
 			continue
 		}
+		s.entries.forget(entry.ID)
 		result.RemovedIDs = append(result.RemovedIDs, entry.ID)
 	}
 	return result, nil
@@ -114,7 +116,7 @@ func (s *FileService) ConfirmTrashEntries(filePaths []string, title string, mess
 
 // MoveEntries 將檔案逐一移至目標資料夾，跨磁碟區時會退回複製後刪除。
 func (s *FileService) MoveEntries(filePaths []string, destination string) (MoveResult, error) {
-	result := MoveResult{Moved: []ImageEntry{}, Failed: []FileOperationFailure{}}
+	result := MoveResult{Moved: []ImageEntry{}, OriginalIDs: make(map[string]string), Failed: []FileOperationFailure{}}
 	destination = strings.TrimSpace(destination)
 	if destination == "" {
 		return result, errors.New("移動目的地不可空白")
@@ -147,32 +149,26 @@ func (s *FileService) MoveEntries(filePaths []string, destination string) (MoveR
 		}
 		seen[entry.ID] = true
 		targetPath := filepath.Join(destination, entry.Name)
-		if _, statErr := os.Stat(targetPath); statErr == nil {
+		if _, statErr := os.Lstat(targetPath); statErr == nil {
 			result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: "目標檔案已存在"})
 			continue
 		} else if !os.IsNotExist(statErr) {
 			result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: statErr.Error()})
 			continue
 		}
-		if err := renameFile(entry.Path, targetPath); err != nil {
-			if copyErr := duplicateFile(entry.Path, targetPath); copyErr != nil {
-				result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: fmt.Sprintf("移動失敗: %v", err)})
-				continue
-			}
-			if removeErr := os.Remove(entry.Path); removeErr != nil {
-				_ = os.Remove(targetPath)
-				result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: fmt.Sprintf("移動後清理來源失敗: %v", removeErr)})
-				continue
-			}
+		if err := moveFileNoReplace(entry.Path, targetPath); err != nil {
+			result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: fmt.Sprintf("移動失敗: %v", err)})
+			continue
 		}
-		movedInfo, statErr := os.Stat(targetPath)
+		movedInfo, statErr := movedFileInfo(targetPath)
 		if statErr != nil {
 			result.Failed = append(result.Failed, FileOperationFailure{Path: filePath, Error: statErr.Error()})
 			continue
 		}
 		moved := buildFileImageEntry(targetPath, movedInfo.Size())
-		s.entries.remember(moved)
+		s.entries.replace(entry.ID, moved)
 		result.Moved = append(result.Moved, moved)
+		result.OriginalIDs[moved.ID] = entry.ID
 	}
 	return result, nil
 }
@@ -184,33 +180,177 @@ func (s *FileService) SelectMoveDestination(dialogTitle string) (string, error) 
 	return wailsruntime.OpenDirectoryDialog(s.ctx, wailsruntime.OpenDialogOptions{Title: strings.TrimSpace(dialogTitle)})
 }
 
-// duplicateFile 會優先建立硬連結，跨磁碟區時才實際複製內容。
-func duplicateFile(sourcePath string, targetPath string) error {
-	if err := os.Link(sourcePath, targetPath); err == nil {
-		return nil
+// movedFileInfo reports a moved symlink even when its relative target no longer
+// resolves in the destination directory. A successful move must not be reported
+// as a failure merely because following the moved link fails.
+func movedFileInfo(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if resolved, statErr := os.Stat(path); statErr == nil {
+			return resolved, nil
+		}
 	}
-	source, err := os.Open(sourcePath)
+	return info, err
+}
+
+// duplicateFile preserves symlinks and regular-file permissions and timestamps.
+// Hard links avoid copying data when the filesystem supports them.
+func duplicateFile(sourcePath string, targetPath string) error {
+	return duplicateFileWithContext(context.Background(), sourcePath, targetPath)
+}
+
+func duplicateFileWithContext(ctx context.Context, sourcePath, targetPath string) error {
+	createdInfo, err := duplicateFileInfo(ctx, sourcePath, targetPath)
+	if err == nil {
+		if err = checkOperation(ctx); err != nil {
+			if rollbackErr := removeFileIfSame(targetPath, createdInfo); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+		}
+	}
+	return err
+}
+
+func duplicateFileInfo(ctx context.Context, sourcePath, targetPath string) (os.FileInfo, error) {
+	if err := checkOperation(ctx); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(sourcePath)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		link, err := os.Readlink(sourcePath)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkOperation(ctx); err != nil {
+			return nil, err
+		}
+		if err := os.Symlink(link, targetPath); err != nil {
+			return nil, err
+		}
+		return os.Lstat(targetPath)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("不支援複製此檔案種類: %s", sourcePath)
+	}
+	if err := checkOperation(ctx); err != nil {
+		return nil, err
+	}
+	if err := os.Link(sourcePath, targetPath); err == nil {
+		return os.Lstat(targetPath)
+	}
+	return copyRegularFile(ctx, sourcePath, targetPath)
+}
+
+// copyRegularFile is used when a hard link cannot cross a volume or is unsupported.
+// Create privately first, then restore the original permissions only after copying.
+func copyRegularFile(ctx context.Context, sourcePath, targetPath string) (createdInfo os.FileInfo, err error) {
+	if err := checkOperation(ctx); err != nil {
+		return nil, err
+	}
+	source, err := openRegularFile(sourcePath)
+	if err != nil {
+		return nil, err
 	}
 	defer source.Close()
-	target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	sourceInfo, err := source.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !sourceInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("不支援複製此檔案種類: %s", sourcePath)
+	}
+	target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	createdInfo, err = target.Stat()
+	if err != nil {
+		_ = target.Close()
+		return nil, err
+	}
+	defer func() {
+		// ExFAT may replace a new file's temporary inode when blocks are
+		// allocated. The still-open FD remains the authority for our output.
+		if current, statErr := target.Stat(); statErr == nil {
+			createdInfo = current
+		}
+		_ = target.Close()
+		if err != nil {
+			err = errors.Join(err, removeFileIfSame(targetPath, createdInfo))
+		}
+	}()
+	if _, err = io.Copy(target, &contextReader{ctx: ctx, reader: source}); err != nil {
+		return createdInfo, err
+	}
+	if err = checkOperation(ctx); err != nil {
+		return createdInfo, err
+	}
+	latestSourceInfo, err := source.Stat()
+	if err != nil {
+		return createdInfo, err
+	}
+	if !os.SameFile(sourceInfo, latestSourceInfo) ||
+		sourceInfo.Size() != latestSourceInfo.Size() || !sourceInfo.ModTime().Equal(latestSourceInfo.ModTime()) ||
+		thumbnailFileIdentity(sourceInfo) != thumbnailFileIdentity(latestSourceInfo) {
+		return createdInfo, fmt.Errorf("複製期間來源已變更: %s", sourcePath)
+	}
+	// A file replaced by another application no longer names our output FD.
+	// Check before applying path-based timestamps or committing the move.
+	createdInfo, err = target.Stat()
+	if err != nil {
+		return createdInfo, err
+	}
+	targetInfo, err := os.Lstat(targetPath)
+	if err != nil {
+		return createdInfo, err
+	}
+	if !os.SameFile(createdInfo, targetInfo) {
+		return createdInfo, fmt.Errorf("複製期間目的地已變更: %s", targetPath)
+	}
+	if err = target.Chmod(sourceInfo.Mode().Perm()); err != nil {
+		return createdInfo, err
+	}
+	if err = os.Chtimes(targetPath, sourceInfo.ModTime(), sourceInfo.ModTime()); err != nil {
+		return createdInfo, err
+	}
+	if err = target.Sync(); err != nil {
+		return createdInfo, err
+	}
+	createdInfo, err = target.Stat()
+	if err != nil {
+		return createdInfo, err
+	}
+	err = target.Close()
+	return createdInfo, err
+}
+
+// Identity checks avoid ordinary rollback races with a replaced destination.
+// They are not a filesystem transaction against malicious concurrent changes.
+func removeFileIfSame(path string, expected os.FileInfo) error {
+	current, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(target, source); err != nil {
-		_ = target.Close()
-		_ = os.Remove(targetPath)
-		return err
+	if expected == nil || !os.SameFile(current, expected) {
+		return fmt.Errorf("目的地已變更，保留檔案: %s", path)
 	}
-	if err := target.Close(); err != nil {
-		_ = os.Remove(targetPath)
-		return err
-	}
-	return nil
+	return os.Remove(path)
 }
 
 func moveToTrash(filePath string) error {
+	return moveToTrashWithContext(context.Background(), filePath)
+}
+
+func moveToTrashWithContext(ctx context.Context, filePath string) error {
+	if err := checkOperation(ctx); err != nil {
+		return err
+	}
 	if runtime.GOOS != "darwin" {
 		return errors.New("此平台不支援垃圾桶")
 	}
@@ -222,25 +362,73 @@ func moveToTrash(filePath string) error {
 	if err := os.MkdirAll(trashDirectory, 0o700); err != nil {
 		return err
 	}
-	targetPath := availableTrashPath(trashDirectory, filepath.Base(filePath))
-	if err := os.Rename(filePath, targetPath); err == nil {
-		return nil
-	}
-	if err := duplicateFile(filePath, targetPath); err != nil {
-		return err
-	}
-	return os.Remove(filePath)
-}
-
-func availableTrashPath(trashDirectory string, name string) string {
+	name := filepath.Base(filePath)
 	extension := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, extension)
-	candidate := filepath.Join(trashDirectory, name)
-	for index := 1; index < 1000; index++ {
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			return candidate
+	for index := 0; index < 1000; index++ {
+		candidate := name
+		if index > 0 {
+			candidate = fmt.Sprintf("%s %d%s", stem, index, extension)
 		}
-		candidate = filepath.Join(trashDirectory, fmt.Sprintf("%s %d%s", stem, index, extension))
+		err := moveFileNoReplaceWithContext(ctx, filePath, filepath.Join(trashDirectory, candidate))
+		if !errors.Is(err, os.ErrExist) {
+			return err
+		}
 	}
-	return candidate
+	return errors.New("垃圾桶中找不到可用的檔名")
+}
+
+// Only cross-device or unsupported native renames fall back to exclusive creation.
+func moveFileNoReplace(sourcePath, targetPath string) error {
+	return moveFileNoReplaceWithContext(context.Background(), sourcePath, targetPath)
+}
+
+func moveFileNoReplaceWithContext(ctx context.Context, sourcePath, targetPath string) error {
+	if err := checkOperation(ctx); err != nil {
+		return err
+	}
+	err := renameFile(sourcePath, targetPath)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, syscall.EXDEV) && !errors.Is(err, syscall.ENOTSUP) {
+		return err
+	}
+	originalInfo, err := os.Lstat(sourcePath)
+	if err != nil {
+		return err
+	}
+	createdInfo, err := duplicateFileInfo(ctx, sourcePath, targetPath)
+	if err != nil {
+		return err
+	}
+	// Cancellation is safe only before the source is removed. Once a native
+	// rename or this removal commits the move, report success even if cancelled.
+	if err := checkOperation(ctx); err != nil {
+		if rollbackErr := removeFileIfSame(targetPath, createdInfo); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+	currentInfo, err := os.Lstat(sourcePath)
+	// Creating a hard link changes ctime itself, and the destination shares any
+	// subsequent content changes. Independent copies need the full source version.
+	copiedSeparately := !os.SameFile(originalInfo, createdInfo)
+	if err != nil || !os.SameFile(originalInfo, currentInfo) ||
+		originalInfo.Size() != currentInfo.Size() || !originalInfo.ModTime().Equal(currentInfo.ModTime()) ||
+		(copiedSeparately && thumbnailFileIdentity(originalInfo) != thumbnailFileIdentity(currentInfo)) {
+		// Preserve both paths when the source changed during the copy.
+		return fmt.Errorf("複製期間來源已變更，已保留目的地複本: %s", targetPath)
+	}
+	currentTarget, err := os.Lstat(targetPath)
+	if err != nil || !os.SameFile(createdInfo, currentTarget) {
+		return fmt.Errorf("複製期間目的地已變更，已保留來源: %s", sourcePath)
+	}
+	if err := os.Remove(sourcePath); err != nil {
+		if rollbackErr := removeFileIfSame(targetPath, createdInfo); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+	return nil
 }

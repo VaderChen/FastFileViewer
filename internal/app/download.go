@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -76,6 +77,8 @@ type downloadRefererContextKey struct{}
 // DownloadService 負責下載佇列與歷史紀錄，狀態完全獨立於圖庫與媒體服務。
 type DownloadService struct {
 	ctx             context.Context
+	cancel          context.CancelFunc
+	closed          bool
 	downloadMu      sync.Mutex
 	downloadPersist sync.Mutex
 	downloads       map[string]*DownloadItem
@@ -85,20 +88,37 @@ type DownloadService struct {
 }
 
 func newDownloadService() *DownloadService {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &DownloadService{
+		ctx:             ctx,
+		cancel:          cancel,
 		downloads:       make(map[string]*DownloadItem),
 		downloadCancels: make(map[string]context.CancelFunc),
 	}
 }
 
 func (d *DownloadService) Startup(ctx context.Context) {
-	d.ctx = ctx
+	d.downloadMu.Lock()
+	if d.closed {
+		d.downloadMu.Unlock()
+		return
+	}
+	previousCancel := d.cancel
+	d.ctx, d.cancel = context.WithCancel(ctx)
+	d.downloadMu.Unlock()
+	previousCancel()
 	d.loadDownloads()
+}
+
+func (d *DownloadService) validationContext() (context.Context, context.CancelFunc) {
+	d.downloadMu.Lock()
+	defer d.downloadMu.Unlock()
+	return context.WithTimeout(d.ctx, 15*time.Second)
 }
 
 func (d *DownloadService) StartDownload(rawURL string) (DownloadItem, error) {
 	rawURL = strings.TrimSpace(rawURL)
-	validationContext, cancelValidation := context.WithTimeout(context.Background(), 15*time.Second)
+	validationContext, cancelValidation := d.validationContext()
 	defer cancelValidation()
 	parsedURL, err := validatePublicDownloadURL(validationContext, rawURL)
 	if err != nil {
@@ -116,7 +136,7 @@ func (d *DownloadService) StartDownload(rawURL string) (DownloadItem, error) {
 }
 
 func (d *DownloadService) ResolveDownloadURL(rawURL string) (DownloadResolution, error) {
-	validationContext, cancelValidation := context.WithTimeout(context.Background(), 15*time.Second)
+	validationContext, cancelValidation := d.validationContext()
 	defer cancelValidation()
 	parsedURL, err := validatePublicDownloadURL(validationContext, strings.TrimSpace(rawURL))
 	if err != nil {
@@ -128,7 +148,7 @@ func (d *DownloadService) ResolveDownloadURL(rawURL string) (DownloadResolution,
 }
 
 func (d *DownloadService) StartResolvedDownload(sourceURL string, hlsURL string, preferredName string) (DownloadItem, error) {
-	validationContext, cancelValidation := context.WithTimeout(context.Background(), 15*time.Second)
+	validationContext, cancelValidation := d.validationContext()
 	defer cancelValidation()
 	parsedSourceURL, err := validatePublicDownloadURL(validationContext, strings.TrimSpace(sourceURL))
 	if err != nil {
@@ -164,13 +184,16 @@ func (d *DownloadService) enqueueDownload(parsedURL *url.URL, name string) (Down
 		Status:    "queued",
 		CreatedAt: time.Now().UnixMilli(),
 	}
-	parent := d.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
-	downloadContext, cancelDownload := context.WithCancel(parent)
-
 	d.downloadMu.Lock()
+	if d.closed {
+		d.downloadMu.Unlock()
+		return DownloadItem{}, nil, errors.New("download service is closed")
+	}
+	if err := d.ctx.Err(); err != nil {
+		d.downloadMu.Unlock()
+		return DownloadItem{}, nil, err
+	}
+	downloadContext, cancelDownload := context.WithCancel(d.ctx)
 	d.downloads[id] = &item
 	d.downloadOrder = append([]string{id}, d.downloadOrder...)
 	d.downloadCancels[id] = cancelDownload
@@ -243,7 +266,7 @@ func (d *DownloadService) RevealDownload(id string) error {
 	if runtime.GOOS != "darwin" {
 		return errors.New("revealing files is only supported on macOS")
 	}
-	return exec.Command("open", "-R", filePath).Start()
+	return exec.Command("open", "-R", filePath).Run()
 }
 
 func (d *DownloadService) OpenDownloadsDirectory() error {
@@ -257,11 +280,15 @@ func (d *DownloadService) OpenDownloadsDirectory() error {
 	if runtime.GOOS != "darwin" {
 		return errors.New("opening folders is only supported on macOS")
 	}
-	return exec.Command("open", directory).Start()
+	return exec.Command("open", directory).Run()
 }
 
 func (d *DownloadService) cleanup() {
 	d.downloadMu.Lock()
+	d.closed = true
+	// Validation and page resolution also belong to the service lifetime, even
+	// before a download has been assigned an ID and entered the queue.
+	d.cancel()
 	cancels := make([]context.CancelFunc, 0, len(d.downloadCancels))
 	for _, cancel := range d.downloadCancels {
 		cancels = append(cancels, cancel)
@@ -278,7 +305,11 @@ func (d *DownloadService) runDownloadTask(ctx context.Context, item DownloadItem
 		current.Error = ""
 	})
 
-	directory, err := downloadsDirectory()
+	var directory string
+	err := ctx.Err()
+	if err == nil {
+		directory, err = downloadsDirectory()
+	}
 	if err == nil {
 		err = os.MkdirAll(directory, 0o755)
 	}
@@ -297,16 +328,38 @@ func (d *DownloadService) runDownloadTask(ctx context.Context, item DownloadItem
 			current.Error = ""
 		case err != nil:
 			current.Status = "failed"
-			current.Error = err.Error()
+			current.Error = redactedDownloadError(err)
 		default:
 			current.Status = "completed"
 			current.Error = ""
 			current.CompletedAt = time.Now().UnixMilli()
 		}
 	}
+	cancel := d.downloadCancels[item.ID]
 	delete(d.downloadCancels, item.ID)
 	d.downloadMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	_ = d.persistDownloads()
+}
+
+func redactedDownloadError(err error) string {
+	var requestError *url.Error
+	if !errors.As(err, &requestError) {
+		return err.Error()
+	}
+	redacted := *requestError
+	if resourceURL, parseErr := url.Parse(requestError.URL); parseErr == nil {
+		resourceURL.User = nil
+		redacted.URL = redactedDownloadURL(resourceURL)
+	} else {
+		redacted.URL = "[invalid URL]"
+	}
+	if requestError.Err != nil {
+		redacted.Err = errors.New(redactedDownloadError(requestError.Err))
+	}
+	return strings.ReplaceAll(err.Error(), requestError.Error(), redacted.Error())
 }
 
 func resolveDownloadPage(ctx context.Context, client *http.Client, parsedURL *url.URL) (DownloadResolution, error) {
@@ -330,6 +383,9 @@ func resolveDownloadPage(ctx context.Context, client *http.Client, parsedURL *ur
 	resolution := DownloadResolution{
 		SourceURL: redactedDownloadURL(resolvedURL),
 		Name:      strings.TrimSuffix(downloadNameFromURL(resolvedURL), filepath.Ext(downloadNameFromURL(resolvedURL))),
+	}
+	if response.StatusCode == http.StatusPartialContent {
+		return DownloadResolution{}, errors.New("server returned an unsolicited partial download")
 	}
 	contentType := normalizedContentType(response.Header.Get("Content-Type"))
 	if isHLSResponse(resolvedURL, contentType) {
@@ -389,6 +445,10 @@ func (d *DownloadService) downloadToDirectory(ctx context.Context, client *http.
 		return fmt.Errorf("server returned %s", response.Status)
 	}
 
+	if response.StatusCode == http.StatusPartialContent {
+		return errors.New("server returned an unsolicited partial download")
+	}
+
 	contentType := normalizedContentType(response.Header.Get("Content-Type"))
 	if isHLSResponse(response.Request.URL, contentType) {
 		return d.downloadHLS(ctx, client, id, response, directory, "", "")
@@ -438,7 +498,7 @@ func (d *DownloadService) saveDownloadBody(ctx context.Context, id string, direc
 	if err != nil {
 		return err
 	}
-	finalPath, err := commitDownloadedFile(tempPath, directory, name)
+	finalPath, err := commitDownloadedFileWithContext(ctx, tempPath, directory, name)
 	if err != nil {
 		_ = os.Remove(tempPath)
 		return err
@@ -482,6 +542,9 @@ func (d *DownloadService) downloadEmbeddedHLS(ctx context.Context, client *http.
 }
 
 func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, id string, initialResponse *http.Response, directory string, referer string, preferredName string) error {
+	if initialResponse.StatusCode == http.StatusPartialContent {
+		return errors.New("HLS server returned an unsolicited partial playlist")
+	}
 	body, err := readLimitedResponse(initialResponse.Body, maxDownloadMetadataBytes)
 	if err != nil {
 		return fmt.Errorf("read HLS playlist: %w", err)
@@ -502,7 +565,7 @@ func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, 
 		if err != nil {
 			return err
 		}
-		body, err = fetchDownloadMetadata(ctx, client, playlistURL.String(), referer)
+		body, playlistURL, err = fetchDownloadMetadata(ctx, client, playlistURL.String(), referer)
 		if err != nil {
 			return fmt.Errorf("fetch HLS media playlist: %w", err)
 		}
@@ -570,17 +633,25 @@ func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, 
 			response.Body.Close()
 			return fmt.Errorf("HLS segment returned %s", response.Status)
 		}
-		if segment.ByteRange != "" && response.StatusCode != http.StatusPartialContent {
+		expectedBytes, rangeErr := validateHLSRangeResponse(response, segment.ByteRange)
+		if rangeErr != nil {
 			response.Body.Close()
-			return errors.New("HLS server ignored a required byte range")
+			return rangeErr
 		}
-		written, copyErr := copyDownloadBody(ctx, tempFile, response.Body, maxDownloadBytes-total, func(delta int64) {
+		remaining := maxDownloadBytes - total
+		if expectedBytes > 0 && expectedBytes < remaining {
+			remaining = expectedBytes
+		}
+		written, copyErr := copyDownloadBody(ctx, tempFile, response.Body, remaining, func(delta int64) {
 			total += delta
 			d.setDownloadBytes(id, total)
 		})
 		response.Body.Close()
 		if copyErr != nil {
 			return copyErr
+		}
+		if expectedBytes > 0 && written != expectedBytes {
+			return errors.New("HLS segment does not match its required byte range")
 		}
 		if written == 0 {
 			return errors.New("HLS segment is empty")
@@ -595,7 +666,7 @@ func (d *DownloadService) downloadHLS(ctx context.Context, client *http.Client, 
 	if err := tempFile.Close(); err != nil {
 		return err
 	}
-	finalPath, err := commitDownloadedFile(tempPath, directory, name)
+	finalPath, err := commitDownloadedFileWithContext(ctx, tempPath, directory, name)
 	if err != nil {
 		return err
 	}
@@ -654,6 +725,9 @@ func copyDownloadBody(ctx context.Context, destination io.Writer, source io.Read
 			return total, err
 		}
 		read, readErr := source.Read(buffer)
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
 		if read > 0 {
 			if total+int64(read) > limit {
 				return total, fmt.Errorf("download exceeds the %s size limit", formatDownloadBytes(limit))
@@ -672,7 +746,7 @@ func copyDownloadBody(ctx context.Context, destination io.Writer, source io.Read
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
-				return total, nil
+				return total, ctx.Err()
 			}
 			return total, readErr
 		}
@@ -694,6 +768,9 @@ func (d *DownloadService) setDownloadBytes(id string, bytes int64) {
 }
 
 func validatePublicDownloadURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if rawURL == "" {
 		return nil, errors.New("enter an HTTP or HTTPS URL")
 	}
@@ -924,6 +1001,7 @@ func parseHLSPlaylist(content string, baseURL *url.URL) (hlsPlaylist, error) {
 	var variantBandwidth int64
 	var pendingRange string
 	var rangeOffset int64
+	var previousRangeURL string
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -966,14 +1044,19 @@ func parseHLSPlaylist(content string, baseURL *url.URL) (hlsPlaylist, error) {
 				variantPending = false
 				continue
 			}
+			if pendingRange != "" && !strings.Contains(pendingRange, "@") && previousRangeURL != resolved {
+				return hlsPlaylist{}, errors.New("implicit HLS byte range requires the previous segment to use the same resource")
+			}
 			byteRange, nextOffset, err := hlsByteRange(pendingRange, rangeOffset)
 			if err != nil {
 				return hlsPlaylist{}, err
 			}
 			if pendingRange != "" {
 				rangeOffset = nextOffset
+				previousRangeURL = resolved
 			} else {
 				rangeOffset = 0
+				previousRangeURL = ""
 			}
 			playlist.Segments = append(playlist.Segments, hlsSegment{URL: resolved, ByteRange: byteRange})
 			pendingRange = ""
@@ -1026,7 +1109,47 @@ func hlsByteRange(value string, fallbackOffset int64) (string, int64, error) {
 			return "", 0, errors.New("invalid HLS byte range offset")
 		}
 	}
+	if offset < 0 || offset > math.MaxInt64-length {
+		return "", 0, errors.New("HLS byte range exceeds the supported offset")
+	}
 	return fmt.Sprintf("bytes=%d-%d", offset, offset+length-1), offset + length, nil
+}
+
+// A 206 status alone does not prove that a server returned the requested slice.
+// Reject mismatched offsets and lengths before joining segments into a video.
+func validateHLSRangeResponse(response *http.Response, requested string) (int64, error) {
+	if requested == "" {
+		if response.StatusCode == http.StatusPartialContent {
+			return 0, errors.New("HLS server returned an unsolicited partial segment")
+		}
+		return 0, nil
+	}
+	if response.StatusCode != http.StatusPartialContent {
+		return 0, errors.New("HLS server ignored a required byte range")
+	}
+	bounds := strings.TrimPrefix(requested, "bytes=")
+	contentRange, hasUnit := strings.CutPrefix(response.Header.Get("Content-Range"), "bytes ")
+	actual, total, found := strings.Cut(contentRange, "/")
+	if !hasUnit || !found || actual != bounds {
+		return 0, errors.New("HLS server returned a different byte range")
+	}
+	startText, endText, _ := strings.Cut(bounds, "-")
+	start, startErr := strconv.ParseInt(startText, 10, 64)
+	end, endErr := strconv.ParseInt(endText, 10, 64)
+	if startErr != nil || endErr != nil || start < 0 || end < start || end == math.MaxInt64 {
+		return 0, errors.New("invalid HLS response byte range")
+	}
+	if total != "*" {
+		size, err := strconv.ParseInt(total, 10, 64)
+		if err != nil || size <= end {
+			return 0, errors.New("invalid HLS response resource size")
+		}
+	}
+	length := end - start + 1
+	if response.ContentLength >= 0 && response.ContentLength != length {
+		return 0, errors.New("HLS response length does not match its byte range")
+	}
+	return length, nil
 }
 
 func resolveHLSReference(baseURL *url.URL, reference string) (string, error) {
@@ -1044,20 +1167,25 @@ func resolveHLSReference(baseURL *url.URL, reference string) (string, error) {
 	return resolved.String(), nil
 }
 
-func fetchDownloadMetadata(ctx context.Context, client *http.Client, rawURL string, referer string) ([]byte, error) {
+func fetchDownloadMetadata(ctx context.Context, client *http.Client, rawURL string, referer string) ([]byte, *url.URL, error) {
 	request, err := newDownloadRequest(ctx, rawURL, referer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("server returned %s", response.Status)
+		return nil, nil, fmt.Errorf("server returned %s", response.Status)
 	}
-	return readLimitedResponse(response.Body, maxDownloadMetadataBytes)
+	if response.StatusCode == http.StatusPartialContent {
+		return nil, nil, errors.New("server returned an unsolicited partial playlist")
+	}
+
+	data, err := readLimitedResponse(response.Body, maxDownloadMetadataBytes)
+	return data, response.Request.URL, err
 }
 
 func minInt(left int, right int) int {
@@ -1142,19 +1270,29 @@ func sanitizeDownloadName(name string) string {
 	if name == "" {
 		name = "download"
 	}
-	if len([]rune(name)) > 180 {
+	// Filesystems usually limit UTF-8 bytes, not rune counts. Reserve room for
+	// a collision suffix and keep even an unusually long extension bounded.
+	if len(name) > 180 {
 		extension := filepath.Ext(name)
-		base := []rune(strings.TrimSuffix(name, extension))
-		maximumBase := 180 - len([]rune(extension))
-		if maximumBase < 1 {
-			maximumBase = 1
-		}
-		if len(base) > maximumBase {
-			base = base[:maximumBase]
-		}
-		name = string(base) + extension
+		base := strings.TrimSuffix(name, extension)
+		extension = truncateDownloadName(extension, 32)
+		name = truncateDownloadName(base, 180-len(extension)) + extension
 	}
 	return name
+}
+
+func truncateDownloadName(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	cut := 0
+	for index := range value {
+		if index > maxBytes {
+			break
+		}
+		cut = index
+	}
+	return value[:cut]
 }
 
 func ensureDownloadExtension(name string, contentType string) string {
@@ -1177,6 +1315,10 @@ func ensureDownloadExtension(name string, contentType string) string {
 }
 
 func commitDownloadedFile(tempPath string, directory string, name string) (string, error) {
+	return commitDownloadedFileWithContext(context.Background(), tempPath, directory, name)
+}
+
+func commitDownloadedFileWithContext(ctx context.Context, tempPath string, directory string, name string) (string, error) {
 	name = sanitizeDownloadName(name)
 	extension := filepath.Ext(name)
 	base := strings.TrimSuffix(name, extension)
@@ -1186,13 +1328,12 @@ func commitDownloadedFile(tempPath string, directory string, name string) (strin
 			candidateName = fmt.Sprintf("%s (%d)%s", base, index, extension)
 		}
 		candidatePath := filepath.Join(directory, candidateName)
-		if err := os.Link(tempPath, candidatePath); err == nil {
-			if err := os.Remove(tempPath); err != nil {
-				_ = os.Remove(candidatePath)
-				return "", err
-			}
+		if err := moveFileNoReplaceWithContext(ctx, tempPath, candidatePath); err == nil {
 			return candidatePath, nil
 		} else if !errors.Is(err, os.ErrExist) {
+			if errors.Is(err, errOperationCancelled) && ctx.Err() != nil {
+				return "", errors.Join(ctx.Err(), err)
+			}
 			return "", err
 		}
 	}
@@ -1222,6 +1363,9 @@ func (d *DownloadService) persistDownloads() error {
 	payload, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return err
+	}
+	if int64(len(payload)) > maxDownloadHistoryBytes {
+		return errors.New("download history is full; remove older entries before starting another download")
 	}
 	historyPath, err := downloadsHistoryPath()
 	if err != nil {
@@ -1259,11 +1403,12 @@ func (d *DownloadService) loadDownloads() {
 	if err != nil {
 		return
 	}
-	info, err := os.Stat(historyPath)
-	if err != nil || info.Size() > maxDownloadHistoryBytes {
+	historyFile, err := openRegularFile(historyPath)
+	if err != nil {
 		return
 	}
-	payload, err := os.ReadFile(historyPath)
+	defer historyFile.Close()
+	payload, err := readLimitedResponse(historyFile, maxDownloadHistoryBytes)
 	if err != nil {
 		return
 	}

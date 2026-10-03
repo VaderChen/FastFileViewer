@@ -19,8 +19,9 @@ Release builds bundle an LGPL shared-library build of FFmpeg 8.1.2 made by `scri
 | github.com/pkg/errors | v0.9.1 | See bundled license text | L024 | `darwin/arm64` |
 | github.com/rivo/uniseg | v0.4.7 | See bundled license text | L027 | `darwin/arm64` |
 | github.com/wailsapp/wails/v2 | v2.13.0 | See bundled license text | L034 | `darwin/arm64` |
-| golang.org/x/image | v0.44.0 | See bundled license text | L025 | `darwin/arm64` |
-| golang.org/x/text | v0.40.0 | See bundled license text | L025 | `darwin/arm64` |
+| golang.org/x/image | v0.45.0 | See bundled license text | L025 | `darwin/arm64` |
+| golang.org/x/sys | v0.47.0 | See bundled license text | L025 | `darwin/arm64` |
+| golang.org/x/text | v0.41.0 | See bundled license text | L025 | `darwin/arm64` |
 
 ## npm Dependencies
 

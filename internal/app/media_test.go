@@ -377,13 +377,19 @@ func TestClaimRemuxPromptOnlyAsksOnce(t *testing.T) {
 	}
 }
 
-func TestAvailableTrashPathAvoidsOverwriting(t *testing.T) {
-	trashDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(trashDirectory, "movie.mkv"), []byte("existing"), 0o600); err != nil {
+func TestMoveToTrashAvoidsOverwriting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	trashDirectory := filepath.Join(home, ".Trash")
+	writeFileOperationFixture(t, trashDirectory, "movie.mkv", "existing")
+	source := writeFileOperationFixture(t, t.TempDir(), "movie.mkv", "new")
+	if err := moveToTrash(source); err != nil {
 		t.Fatal(err)
 	}
-	if candidate := availableTrashPath(trashDirectory, "movie.mkv"); filepath.Base(candidate) != "movie 1.mkv" {
-		t.Fatalf("同名檔案應該改名: %s", candidate)
+	existing, _ := os.ReadFile(filepath.Join(trashDirectory, "movie.mkv"))
+	moved, _ := os.ReadFile(filepath.Join(trashDirectory, "movie 1.mkv"))
+	if string(existing) != "existing" || string(moved) != "new" {
+		t.Fatal("trash overwrote a same-name file")
 	}
 }
 

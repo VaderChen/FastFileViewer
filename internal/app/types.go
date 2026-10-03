@@ -78,8 +78,9 @@ type TrashResult struct {
 }
 
 type MoveResult struct {
-	Moved  []ImageEntry           `json:"moved"`
-	Failed []FileOperationFailure `json:"failed"`
+	OriginalIDs map[string]string      `json:"originalIds"`
+	Moved       []ImageEntry           `json:"moved"`
+	Failed      []FileOperationFailure `json:"failed"`
 }
 
 type AppInfo struct {

@@ -8,7 +8,7 @@ FastFileViewer 是以 Go、Wails、React 與 TypeScript 建立的 macOS 本機�
 
 ## 技術棧與專案結構
 
-- Go 1.26.4：後端檔案、壓縮檔、媒體與下載服務。
+- Go 1.26.6：後端檔案、壓縮檔、媒體與下載服務。
 - Wails 2.13.0：將 Go 服務綁定到 macOS 桌面視窗及前端 WebView。
 - React 18、TypeScript、Vite 8：內容樹、Viewer、工作區、設定與下載介面。
 - `react-markdown`、`remark-gfm`、`highlight.js`、`rehype-highlight`：Markdown 與程式碼預覽。

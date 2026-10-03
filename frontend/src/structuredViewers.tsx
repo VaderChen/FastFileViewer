@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import { parseDelimitedText, parseJsonDocument } from './structuredData';
+import { Component, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { buildJsonPreview, parseDelimitedText, parseJsonDocument } from './structuredData';
+import type { JsonPreviewNode } from './structuredData';
 import './structuredViewers.css';
 
-const maxJsonNodes = 10_000;
 const maxRenderedTableRows = 1_000;
 
 export interface StructuredViewerLabels {
@@ -14,8 +15,22 @@ export interface StructuredViewerLabels {
   truncated: string;
 }
 
+class JsonPreviewBoundary extends Component<{ text: string; label: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) return <div className="structured-error"><strong>{this.props.label}</strong><pre>{this.props.text.slice(0, 100_000)}</pre></div>;
+    return this.props.children;
+  }
+}
+
 export function JsonStructuredView({ text, labels }: { text: string; labels: StructuredViewerLabels }) {
+  return <JsonPreviewBoundary key={text} text={text} label={labels.invalidJson}><JsonPreview text={text} labels={labels} /></JsonPreviewBoundary>;
+}
+
+function JsonPreview({ text, labels }: { text: string; labels: StructuredViewerLabels }) {
   const document = useMemo(() => parseJsonDocument(text), [text]);
+  const preview = useMemo(() => buildJsonPreview(document.value), [document]);
   if (document.error) {
     return (
       <div className="structured-error">
@@ -25,62 +40,36 @@ export function JsonStructuredView({ text, labels }: { text: string; labels: Str
     );
   }
 
-  const budget = { count: 0, truncated: false };
-  const truncated = countJsonNodes(document.value, maxJsonNodes + 1) > maxJsonNodes;
   return (
     <div className="json-structured-view">
-      <JsonNode name="$" value={document.value} depth={0} budget={budget} />
-      {truncated ? <div className="structured-warning">{labels.truncated}</div> : null}
+      <JsonNode key={text} node={preview.root} depth={0} truncatedLabel={labels.truncated} />
+      {preview.truncated ? <div className="structured-warning">{labels.truncated}</div> : null}
     </div>
   );
 }
 
-function JsonNode({ name, value, depth, budget }: { name: string; value: unknown; depth: number; budget: { count: number; truncated: boolean } }) {
-  budget.count += 1;
-  if (budget.count > maxJsonNodes) {
-    budget.truncated = true;
-    return null;
-  }
-  if (value === null || typeof value !== 'object') {
+function JsonNode({ node, depth, truncatedLabel }: { node: JsonPreviewNode; depth: number; truncatedLabel: string }) {
+  const [expanded, setExpanded] = useState(depth < 2);
+  if (!node.children) {
     return (
       <div className="json-leaf" style={{ paddingLeft: depth === 0 ? 0 : '18px' }}>
-        <span className="json-key">{name}</span>
-        <span className={`json-value ${typeof value}`}>{formatJsonPrimitive(value)}</span>
+        <span className="json-key">{node.name}</span>
+        <span className={'json-value ' + typeof node.value}>{formatJsonPrimitive(node.value)}</span>
       </div>
     );
   }
-
-  const entries = Array.isArray(value)
-    ? value.map((item, index) => [String(index), item] as const)
-    : Object.entries(value as Record<string, unknown>);
   return (
-    <details className="json-branch" open={depth < 2} style={{ marginLeft: depth === 0 ? 0 : '18px' }}>
+    <details className="json-branch" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)} style={{ marginLeft: depth === 0 ? 0 : '18px' }}>
       <summary>
-        <span className="json-key">{name}</span>
-        <span className="json-count">{Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`}</span>
+        <span className="json-key">{node.name}</span>
+        <span className="json-count">{node.array ? '[' + node.count + ']' : '{' + node.count + '}'}</span>
       </summary>
-      <div>
-        {entries.map(([childName, childValue]) => (
-          <JsonNode key={childName} name={childName} value={childValue} depth={depth + 1} budget={budget} />
-        ))}
-      </div>
+      {expanded ? <div>
+        {node.children.map((child) => <JsonNode key={child.name} node={child} depth={depth + 1} truncatedLabel={truncatedLabel} />)}
+        {node.truncated ? <div className="structured-warning">{truncatedLabel}</div> : null}
+      </div> : null}
     </details>
   );
-}
-
-function countJsonNodes(value: unknown, limit: number): number {
-  let count = 1;
-  if (value === null || typeof value !== 'object') {
-    return count;
-  }
-  const children = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
-  for (const child of children) {
-    count += countJsonNodes(child, limit - count);
-    if (count >= limit) {
-      return count;
-    }
-  }
-  return count;
 }
 
 function formatJsonPrimitive(value: unknown): string {
@@ -95,7 +84,7 @@ export function DelimitedTableView({ text, delimiter, labels }: { text: string; 
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ column: number; direction: 'asc' | 'desc' } | null>(null);
   const header = parsed.rows[0] ?? [];
-  const dataRows = parsed.rows.slice(1);
+  const dataRows = useMemo(() => parsed.rows.slice(1), [parsed.rows]);
   const visibleRows = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     let nextRows = normalizedQuery
@@ -107,7 +96,7 @@ export function DelimitedTableView({ text, delimiter, labels }: { text: string; 
         return sort.direction === 'asc' ? comparison : -comparison;
       });
     }
-    return nextRows.slice(0, maxRenderedTableRows);
+    return { rows: nextRows.slice(0, maxRenderedTableRows), truncated: nextRows.length > maxRenderedTableRows };
   }, [dataRows, query, sort]);
 
   const toggleSort = (column: number) => {
@@ -137,16 +126,16 @@ export function DelimitedTableView({ text, delimiter, labels }: { text: string; 
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, rowIndex) => (
+            {visibleRows.rows.map((row, rowIndex) => (
               <tr key={rowIndex}>
                 {header.map((_, column) => <td key={column}>{row[column] ?? ''}</td>)}
               </tr>
             ))}
           </tbody>
         </table>
-        {visibleRows.length === 0 ? <div className="table-empty">{labels.noMatchingRows}</div> : null}
+        {visibleRows.rows.length === 0 ? <div className="table-empty">{labels.noMatchingRows}</div> : null}
       </div>
-      {parsed.truncated || dataRows.length > maxRenderedTableRows ? <div className="structured-warning">{labels.truncated}</div> : null}
+      {parsed.truncated || visibleRows.truncated ? <div className="structured-warning">{labels.truncated}</div> : null}
     </div>
   );
 }

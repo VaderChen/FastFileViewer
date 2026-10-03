@@ -4,10 +4,11 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxArchive, faCheck, faFileLines, faFolder, faImage, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import type { ImageEntry } from './types';
 import { formatBytes } from './format';
-import { observeThumbnailVisibility, readThumbnail, storeThumbnail } from './thumbnailCache';
+import { observeThumbnailVisibility, readThumbnail, requestThumbnail } from './thumbnailCache';
 
 interface ThumbnailCardProps {
   image: ImageEntry;
+  revision?: number;
   active: boolean;
   selected: boolean;
   archiveLabel: string;
@@ -16,11 +17,16 @@ interface ThumbnailCardProps {
   onOpen: () => void;
 }
 
-export function ThumbnailCard({ image, active, selected, archiveLabel, folderLabel, onToggle, onOpen }: ThumbnailCardProps) {
+export function ThumbnailCard({ image, revision = 0, active, selected, archiveLabel, folderLabel, onToggle, onOpen }: ThumbnailCardProps) {
   const cardRef = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(image.kind !== 'image');
-  const [thumbnail, setThumbnail] = useState(() => readThumbnail(image.path));
-  const [thumbnailStatus, setThumbnailStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>(() => thumbnail ? 'ready' : 'idle');
+  const [preview, setPreview] = useState<{ path: string; revision: number; dataUri: string; status: 'idle' | 'loading' | 'ready' | 'failed' }>(() => {
+    const cached = readThumbnail(image.path);
+    return { path: image.path, revision, dataUri: cached, status: cached ? 'ready' : 'idle' };
+  });
+  const previewIsCurrent = preview.path === image.path && preview.revision === revision;
+  const thumbnail = previewIsCurrent ? preview.dataUri : '';
+  const thumbnailStatus = previewIsCurrent ? preview.status : 'idle';
 
   useEffect(() => {
     if (image.kind !== 'image' || visible) {
@@ -35,34 +41,33 @@ export function ThumbnailCard({ image, active, selected, archiveLabel, folderLab
 
   useEffect(() => {
     if (image.kind !== 'image' || !visible) {
-      setThumbnail('');
+      setPreview({ path: image.path, revision, dataUri: '', status: 'idle' });
       return;
     }
     const cached = readThumbnail(image.path);
     if (cached) {
-      setThumbnail(cached);
-      setThumbnailStatus('ready');
+      setPreview({ path: image.path, revision, dataUri: cached, status: 'ready' });
       return;
     }
     let cancelled = false;
-    setThumbnailStatus('loading');
-    void window.go?.app?.App?.LoadThumbnailByPath?.(image.path, 280)
-      .then((payload) => {
-        if (!cancelled && payload?.dataUri) {
-          storeThumbnail(image.path, payload.dataUri);
-          setThumbnail(payload.dataUri);
-          setThumbnailStatus('ready');
+    const controller = new AbortController();
+    setPreview({ path: image.path, revision, dataUri: '', status: 'loading' });
+    void requestThumbnail(image.path, controller.signal)
+      .then((dataUri) => {
+        if (!cancelled) {
+          setPreview({ path: image.path, revision, dataUri, status: 'ready' });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setThumbnailStatus('failed');
+          setPreview({ path: image.path, revision, dataUri: '', status: 'failed' });
         }
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [image.kind, image.path, visible]);
+  }, [image.kind, image.path, revision, visible]);
 
   return (
     <article ref={cardRef} className={`thumbnail-card ${active ? 'active' : ''} ${selected ? 'selected' : ''}`} onDoubleClick={onOpen}>

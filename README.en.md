@@ -43,10 +43,9 @@ The public source edition does not use StoreKit or App Sandbox and does not cont
 ## Requirements
 
 - Apple Silicon Mac with macOS 12 or later
-- Go 1.26.4 or a compatible version
+- Go 1.26.6 or a compatible version
 - Node.js and npm
 - Xcode Command Line Tools
-- `rsync`
 - `pkg-config`, libopus, and libvpx (required to build the bundled LGPL FFmpeg; install with `brew install pkg-config opus libvpx`)
 
 ## Development
@@ -57,7 +56,7 @@ cd FastFileViewer
 ./run.sh
 ```
 
-The development script mirrors the project into a local temporary directory to avoid AppleDouble and external-drive small-file issues.
+The development script runs Wails directly in the project directory. Frontend dependencies are installed in `frontend/node_modules`, and the pinned Wails CLI is installed in `build/tools`.
 
 ## Build
 
@@ -66,7 +65,7 @@ The development script mirrors the project into a local temporary directory to a
 ./build.sh
 ```
 
-The output is `dist/FastFileViewer.app`. The build runs Go and frontend verification and bundles GPLv3, complete third-party license texts, notices, and traceable Git build metadata under `Contents/Resources`.
+The output is `dist/FastFileViewer.app`. The build runs Go and frontend verification and bundles the project license, complete third-party license texts, notices, and traceable Git build metadata under `Contents/Resources`.
 
 Prebuilt downloads are available from [GitHub Releases](https://github.com/VaderChen/FastFileViewer/releases).
 

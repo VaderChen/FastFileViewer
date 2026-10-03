@@ -34,7 +34,7 @@ FastFileViewer 是 macOS 本機優先檔案工作台，可瀏覽一般資料夾�
 
 ## 技術組成
 
-- 後端：Go 1.26.4
+- 後端：Go 1.26.6（build.sh／run.sh 依 go.mod 的 go 版本選用工具鏈，避免本機升級後改變 macOS 最低要求）
 - 桌面框架：Wails 2.13.0
 - 前端：React 18、TypeScript、Vite 8
 - Markdown：`react-markdown`、`remark-gfm`
@@ -98,7 +98,13 @@ Wails 綁定三個服務，避免圖庫、媒體與下載佇列共用同一組�
 ## 安全限制
 
 - 文件預覽上限 8 MB；語法 Render 最多 2,000,000 字元或 30,000 行。
-- 圖片讀取上限 128 MB；縮圖來源上限 64 MB。
+- 圖片讀取上限 128 MB；縮圖來源上限 64 MB。SVG／HEIC 保留瀏覽器解碼例外，同樣套用位元組上限。
+- 縮圖磁碟快取在每次寫入後限制 1,200 筆與 256 MiB；媒體快取以來源檔案識別、大小與修改時間檢查失效。
+- JSON 預覽最多 10,000 個節點、64 層；收合分支延後渲染，渲染錯誤提供原始文字備援。
+- 檔案移動／改名採不可覆寫操作；MoveResult.originalIds 以新 ID 對應原 ID，批次操作回傳部分失敗原因。
+- 跨磁碟備援搬移保留連結、權限與修改時間；完成前可取消，實際搬移完成後回報成功。回滾前核對目的檔身分。
+- 媒體清理先取消正在進行的工作；準備、保存、釋放共用可取消項目鎖。影音／PDF 串流取得 FD 後釋鎖，避免整段播放阻塞其他操作。
+- FFmpeg 發行工具必須成功回傳版本與組態資訊，才可繼續封裝。
 - 圖片解碼上限 50 megapixels。
 - 匯出及 SHA-256 單一項目上限 4 GB。
 - Markdown URL 全部阻擋，不載入遠端內容或原始 HTML。
@@ -124,10 +130,9 @@ Wails 綁定三個服務，避免圖庫、媒體與下載佇列共用同一組�
 
 腳本會：
 
-1. 依 `go.mod` 安裝相同版本的 Wails CLI。
-2. 依 `package-lock.json` 安裝前端依賴至本機暫存目錄。
-3. 建立本機開發鏡像並持續同步原始碼。
-4. 從鏡像啟動 Wails dev，避免外接磁碟 AppleDouble 問題。
+1. 依 `go.mod` 將相同版本的 Wails CLI 安裝至 `build/tools/<version>/wails`。
+2. 依 `package-lock.json` 將前端依賴直接安裝至 `frontend/node_modules`。
+3. 在專案目錄啟動 Wails dev，由 Wails／Vite 監看原始碼並熱更新。
 
 ## 公開版建置
 
@@ -149,13 +154,15 @@ BUILD_SOURCE_URL=https://github.com/example/FastFileViewer \
 
 建置流程：
 
-1. `go mod verify`、`go vet`、`go test -race`，包含 URL、重新導向、HLS、檔名及持久化測試。
-2. 前端測試、production build 與 production dependency audit。
+1. `npm ci` 後先建立前端 production assets，確保 Go embed 在乾淨工作目錄中也有輸入。
+2. `go mod verify`、`go vet`、`go test -race`，再執行前端測試與 production dependency audit。
 3. 產生 `THIRD-PARTY-NOTICES.md` 與 `THIRD-PARTY-LICENSES.txt`。
-4. 在本機暫存目錄建立 Wails App。
-5. 嵌入 GPLv3、第三方授權及 `build-metadata.json`。
+4. 在專案目錄建置，產生 `build/bin/FastFileViewer.app`。
+5. 嵌入專案的 `LICENSE*.md`、第三方授權及 `build-metadata.json`。
 6. 移除不屬於公開建置的本機發布資產並完成 App Bundle 封裝。
 7. 完成 App Bundle 並輸出 `dist/FastFileViewer.app`。
+
+`./clean.sh` 僅清除專案內的建置產物及 Wails CLI；保留 `frontend/node_modules`，不刪除系統暫存快取。
 
 ## 授權清冊
 

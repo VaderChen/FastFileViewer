@@ -7,6 +7,7 @@ import {
   audioSpectrumMinimumDecibels,
   calculateLogSpectrumAmplitudes,
   convertSubtitleToWebVTT,
+  decodeSubtitleText,
   sidecarSubtitlePaths,
 } from './mediaSupport';
 
@@ -104,6 +105,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
   const remuxCleanupDecisionRef = useRef<((approved: boolean) => void) | null>(null);
   const conversionDecisionRef = useRef<((approved: boolean) => void) | null>(null);
   const prepareOperationRef = useRef(0);
+  const playbackSessionRef = useRef<{ entryId: string; path: string; cancelled: boolean } | null>(null);
   const resumedPlaybackRef = useRef<ResumedVideoPlayback | null>(null);
   const labelsRef = useRef(labels);
   labelsRef.current = labels;
@@ -206,6 +208,8 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
 
   useEffect(() => {
     let cancelled = false;
+    const session = { entryId: entry.id, path: entry.path, cancelled: false };
+    playbackSessionRef.current = session;
     resumeAudioAfterSourceChangeRef.current = resumeAudioAfterSourceChangeRef.current
       || (entry.kind === 'audio' && audioRef.current !== null && !audioRef.current.paused);
     setMediaURL('');
@@ -217,12 +221,14 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     remuxCleanupPromptRef.current = null;
     // 解壓與改封裝可能很久，掛上操作編號讓切換檔案時能真正中止後端工作。
     void (async () => {
-      const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-      prepareOperationRef.current = operationId;
+      let operationId = 0;
       try {
+        operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
         if (cancelled) {
+          if (operationId) await window.go?.app?.App?.CancelOperation?.(operationId);
           return;
         }
+        prepareOperationRef.current = operationId;
         const needsConversion = requiresMediaConversion(entry);
         if (needsConversion) {
           const approved = await askConversionApproval(entry.name);
@@ -274,7 +280,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
               : labelsRef.current.playbackFailed);
         }
       } finally {
-        if (prepareOperationRef.current === operationId) {
+        if (!cancelled && prepareOperationRef.current === operationId) {
           setConversionDialog(null);
         }
         finishPrepareOperation(prepareOperationRef, operationId);
@@ -282,6 +288,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
     })();
     return () => {
       cancelled = true;
+      session.cancelled = true;
       conversionDecisionRef.current?.(false);
       conversionDecisionRef.current = null;
       setConversionDialog(null);
@@ -289,7 +296,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
       remuxCleanupDecisionRef.current = null;
       setRemuxCleanupDialogName('');
       if (prepareOperationRef.current !== 0) {
-        void window.go?.app?.App?.CancelOperation?.(prepareOperationRef.current);
+        void window.go?.app?.App?.CancelOperation?.(prepareOperationRef.current).catch(() => undefined);
       }
       // 詢問是否保留改封裝結果的對話框還開著時，要等它結束才能釋放暫存檔。
       const pendingPrompt = remuxCleanupPromptRef.current;
@@ -385,42 +392,55 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (pausePlayback && audio && !audio.paused) {
-      audio.pause();
+    if (pausePlayback) {
+      resumeAudioAfterSourceChangeRef.current = false;
+      if (audio && !audio.paused) audio.pause();
     }
-  }, [pausePlayback]);
+  }, [pausePlayback, mediaURL]);
 
   const handleAudioError = async () => {
+    const session = playbackSessionRef.current;
+    const isCurrent = () => session !== null && !session.cancelled
+      && playbackSessionRef.current === session && session.entryId === entry.id && session.path === entry.path;
+    if (!isCurrent()) return;
     if (audioFallbackAttemptedRef.current || !window.go?.app?.MediaService?.PrepareCompatibleMediaByPath) {
       setError(labels.playbackFailed);
       return;
     }
     audioFallbackAttemptedRef.current = true;
     setError('');
-    const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-    prepareOperationRef.current = operationId;
-    const approved = await askConversionApproval(entry.name);
-    if (!approved) {
-      setError(labels.conversionCancelled);
-      finishPrepareOperation(prepareOperationRef, operationId);
-      return;
-    }
-    setConversionDialog({ phase: 'progress', name: entry.name });
+    let operationId = 0;
     try {
+      operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+      if (!isCurrent()) {
+        if (operationId) await window.go?.app?.App?.CancelOperation?.(operationId);
+        return;
+      }
+      prepareOperationRef.current = operationId;
+      const approved = await askConversionApproval(entry.name);
+      if (!isCurrent()) return;
+      if (!approved) {
+        setError(labels.conversionCancelled);
+        return;
+      }
+      setConversionDialog({ phase: 'progress', name: entry.name });
       const compatibleURL = await window.go.app.MediaService.PrepareCompatibleMediaByPath(entry.path, operationId);
+      if (!isCurrent()) return;
       if (!compatibleURL) {
         setError(labels.playbackFailed);
         return;
       }
       setMediaURL(compatibleURL);
     } catch (reason) {
-      setError(reason instanceof Error && reason.message
-        ? reason.message
-        : typeof reason === 'string' && reason
-          ? reason
-          : labels.playbackFailed);
+      if (isCurrent()) {
+        setError(reason instanceof Error && reason.message
+          ? reason.message
+          : typeof reason === 'string' && reason
+            ? reason
+            : labels.playbackFailed);
+      }
     } finally {
-      if (prepareOperationRef.current === operationId) {
+      if (isCurrent() && prepareOperationRef.current === operationId) {
         setConversionDialog(null);
       }
       finishPrepareOperation(prepareOperationRef, operationId);
@@ -445,6 +465,7 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
         if (cancelled) return;
         try {
           const payload = await window.go?.app?.App?.LoadDocumentByPath?.(subtitlePath);
+          if (cancelled) return;
           if (!payload) continue;
           const webVTT = convertSubtitleToWebVTT(payload.text, payload.format);
           if (!webVTT) continue;
@@ -772,15 +793,23 @@ export function MediaPlayer({ entry, subtitle, labels, visible = true, pausePlay
             controls
             preload="metadata"
             src={mediaURL}
-            autoPlay={resumeAudioAfterSourceChangeRef.current}
+            autoPlay={!pausePlayback && resumeAudioAfterSourceChangeRef.current}
             onCanPlay={(event) => {
+              if (pausePlayback) {
+                resumeAudioAfterSourceChangeRef.current = false;
+                return;
+              }
               if (!resumeAudioAfterSourceChangeRef.current) {
                 return;
               }
               resumeAudioAfterSourceChangeRef.current = false;
               void event.currentTarget.play().catch(() => undefined);
             }}
-            onPlay={() => {
+            onPlay={(event) => {
+              if (pausePlayback) {
+                event.currentTarget.pause();
+                return;
+              }
               setPlaying(true);
               void audioContextRef.current?.resume().catch(() => undefined);
             }}
@@ -809,19 +838,31 @@ function acquireAudioGraph(audio: HTMLAudioElement, AudioContextConstructor: typ
     return existing;
   }
   const context = new AudioContextConstructor({ latencyHint: 'interactive' });
-  const source = context.createMediaElementSource(audio);
-  const analyser = context.createAnalyser();
-  const muteGain = context.createGain();
-  analyser.fftSize = 32768;
-  analyser.minDecibels = audioSpectrumMinimumDecibels;
-  analyser.maxDecibels = audioSpectrumMaximumDecibels;
-  analyser.smoothingTimeConstant = 0.78;
-  source.connect(analyser);
-  analyser.connect(muteGain);
-  muteGain.connect(context.destination);
-  const graph = { context, source, analyser, muteGain, disposeTimer: null };
-  audioGraphs.set(audio, graph);
-  return graph;
+  const nodes: AudioNode[] = [];
+  try {
+    const source = context.createMediaElementSource(audio);
+    nodes.push(source);
+    const analyser = context.createAnalyser();
+    nodes.push(analyser);
+    const muteGain = context.createGain();
+    nodes.push(muteGain);
+    analyser.fftSize = 32768;
+    analyser.minDecibels = audioSpectrumMinimumDecibels;
+    analyser.maxDecibels = audioSpectrumMaximumDecibels;
+    analyser.smoothingTimeConstant = 0.78;
+    source.connect(analyser);
+    analyser.connect(muteGain);
+    muteGain.connect(context.destination);
+    const graph = { context, source, analyser, muteGain, disposeTimer: null };
+    audioGraphs.set(audio, graph);
+    return graph;
+  } catch (error) {
+    for (const node of nodes) {
+      try { node.disconnect(); } catch { /* 繼續釋放其餘已建立的節點。 */ }
+    }
+    void context.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 function releaseAudioGraph(audio: HTMLAudioElement, graph: AudioGraph) {
@@ -843,7 +884,7 @@ function releaseAudioGraph(audio: HTMLAudioElement, graph: AudioGraph) {
 // finishPrepareOperation 會結束後端的操作紀錄，並清掉仍指向這次準備工作的參考。
 function finishPrepareOperation(operationRef: { current: number }, operationId: number) {
   if (operationId !== 0) {
-    void window.go?.app?.App?.FinishOperation?.(operationId);
+    void window.go?.app?.App?.FinishOperation?.(operationId).catch(() => undefined);
   }
   if (operationRef.current === operationId) {
     operationRef.current = 0;
@@ -929,11 +970,12 @@ function applySubtitlePresentation(webVTT: string, presentation: SubtitlePresent
 function parseWebVTTCues(webVTT: string): SubtitleCue[] {
   return webVTT.split(/\n{2,}/).flatMap((block): SubtitleCue[] => {
     const lines = block.split('\n');
+    if (/^(?:NOTE(?:\s|$)|STYLE$|REGION$)/.test(lines[0])) return [];
     const timingIndex = lines.findIndex((line) => line.includes('-->'));
     if (timingIndex < 0) {
       return [];
     }
-    const timing = lines[timingIndex].match(/(\d{2}:\d{2}:\d{2}\.\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}\.\d{3})/);
+    const timing = lines[timingIndex].match(/^((?:\d{2,}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2,}:)?\d{2}:\d{2}\.\d{3})(?:\s|$)/);
     if (!timing) {
       return [];
     }
@@ -941,9 +983,12 @@ function parseWebVTTCues(webVTT: string): SubtitleCue[] {
     if (!text) {
       return [];
     }
+    const start = parseWebVTTTime(timing[1]);
+    const end = parseWebVTTTime(timing[2]);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
     return [{
-      start: parseWebVTTTime(timing[1]),
-      end: parseWebVTTTime(timing[2]),
+      start,
+      end,
       text: decodeSubtitleText(text),
     }];
   });
@@ -954,17 +999,8 @@ function parseWebVTTTime(value: string): number {
   const seconds = Number(parts.pop() ?? 0);
   const minutes = Number(parts.pop() ?? 0);
   const hours = Number(parts.pop() ?? 0);
+  if (minutes >= 60 || seconds >= 60) return Number.NaN;
   return hours * 3600 + minutes * 60 + seconds;
-}
-
-function decodeSubtitleText(value: string): string {
-  return value
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&amp;/gi, '&')
-    .replace(/<[^>]*>/g, '');
 }
 
 function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number): number {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,14 +33,13 @@ func (s *MediaService) serveDocument(response http.ResponseWriter, request *http
 		return
 	}
 
-	documentPath, err := s.seekableMediaPath(request.Context(), entry)
+	file, _, err := s.openMediaFile(request.Context(), entry)
 	if err != nil {
-		http.Error(response, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	file, err := os.Open(documentPath)
-	if err != nil {
-		http.NotFound(response, request)
+		if os.IsNotExist(err) || errors.Is(err, errNotRegularFile) {
+			http.NotFound(response, request)
+		} else {
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	defer file.Close()

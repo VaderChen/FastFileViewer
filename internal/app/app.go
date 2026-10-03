@@ -13,10 +13,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
-	"image/png"
 	"io"
 	"os"
 	"os/exec"
@@ -32,7 +30,6 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	_ "golang.org/x/image/bmp"
-	"golang.org/x/image/draw"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 	"golang.org/x/text/encoding"
@@ -180,7 +177,7 @@ type App struct {
 	entries          *entryRegistry
 	operations       *operationRegistry
 	media            *MediaService
-	thumbnailOnce    sync.Once
+	thumbnails       thumbnailDiskCache
 	libraryCacheMu   sync.Mutex
 	openFileMu       sync.Mutex
 	pendingOpenFiles []string
@@ -217,8 +214,11 @@ func (s *Services) Startup(ctx context.Context) {
 
 // Shutdown 會釋放各服務持有的暫存資源。
 func (s *Services) Shutdown() {
+	s.Library.operations.close()
 	s.Download.cleanup()
 	s.Media.cleanup()
+	archiveZIPs.clear()
+	archiveTARs.clear()
 }
 
 func (a *App) Startup(ctx context.Context) {
@@ -289,19 +289,38 @@ func (a *App) LoadLibraryCache(rootPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(cachePath)
+	info, err := os.Lstat(cachePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("讀取目錄快取失敗: %w", err)
 	}
-	if info.Size() > maxLibraryCacheBytes {
-		return "", fmt.Errorf("目錄快取超過 %d MB 上限", maxLibraryCacheBytes/(1024*1024))
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("讀取目錄快取失敗: %w", errNotRegularFile)
 	}
-	payload, err := os.ReadFile(cachePath)
+	file, err := openRegularFile(cachePath)
 	if err != nil {
 		return "", fmt.Errorf("讀取目錄快取失敗: %w", err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("讀取目錄快取失敗: %w", err)
+	}
+	if !os.SameFile(info, openedInfo) {
+		return "", errors.New("讀取期間目錄快取已變更")
+	}
+	if openedInfo.Size() > maxLibraryCacheBytes {
+		return "", fmt.Errorf("目錄快取超過 %d MB 上限", maxLibraryCacheBytes/(1024*1024))
+	}
+	// Stat 與讀取必須使用同一 FD；即使檔案成長，讀取本身仍有上限。
+	payload, err := io.ReadAll(io.LimitReader(file, maxLibraryCacheBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("讀取目錄快取失敗: %w", err)
+	}
+	if int64(len(payload)) > maxLibraryCacheBytes {
+		return "", fmt.Errorf("目錄快取超過 %d MB 上限", maxLibraryCacheBytes/(1024*1024))
 	}
 	return string(payload), nil
 }
@@ -376,6 +395,10 @@ func (a *App) SelectDirectory(dialogTitle string) (string, error) {
 }
 
 func (a *App) LoadThumbnailByPath(filePath string, maxDimension int) (ImagePayload, error) {
+	ctx := a.operationContext(0)
+	if err := checkOperation(ctx); err != nil {
+		return ImagePayload{}, err
+	}
 	entry, err := entryByPath(filePath)
 	if err != nil {
 		return ImagePayload{}, err
@@ -390,58 +413,50 @@ func (a *App) LoadThumbnailByPath(filePath string, maxDimension int) (ImagePaylo
 		maxDimension = 640
 	}
 
-	thumbnailSlots <- struct{}{}
-	defer func() { <-thumbnailSlots }()
+	select {
+	case thumbnailSlots <- struct{}{}:
+		defer func() { <-thumbnailSlots }()
+	case <-ctx.Done():
+		return ImagePayload{}, errOperationCancelled
+	}
+	if err := checkOperation(ctx); err != nil {
+		return ImagePayload{}, err
+	}
 
 	cachePath, cachePathErr := thumbnailCachePath(entry, maxDimension)
 	if cachePathErr == nil {
-		a.thumbnailOnce.Do(func() {
-			_ = os.MkdirAll(filepath.Dir(cachePath), 0o700)
-			pruneCacheFiles(filepath.Dir(cachePath), maxThumbnailCacheFiles)
-		})
-		if cachedData, cacheErr := readThumbnailCache(cachePath); cacheErr == nil {
+		if cachedData, cacheErr := a.thumbnails.read(cachePath); cacheErr == nil {
+			if err := checkOperation(ctx); err != nil {
+				return ImagePayload{}, err
+			}
 			return thumbnailPayloadFromData(entry, cachedData), nil
 		}
 	}
 
-	entryData, err := readEntryLimited(entry, maxThumbnailInputBytes)
-	if err != nil {
-		return ImagePayload{}, err
-	}
 	if entry.Format == ".svg" {
+		entryData, err := readEntryLimitedWithContext(ctx, entry, maxThumbnailInputBytes)
+		if err != nil {
+			return ImagePayload{}, err
+		}
 		return imagePayloadFromData(entry, entryData), nil
 	}
-
-	config, _, err := image.DecodeConfig(bytes.NewReader(entryData))
+	thumbnailData, err := renderThumbnailWithContext(ctx, entry, maxDimension)
 	if err != nil {
-		return ImagePayload{}, fmt.Errorf("無法產生 %s 縮圖: %w", entry.Name, err)
-	}
-	if err := validateImageDimensions(config.Width, config.Height); err != nil {
 		return ImagePayload{}, err
 	}
-	decoded, _, err := image.Decode(bytes.NewReader(entryData))
-	if err != nil {
-		return ImagePayload{}, fmt.Errorf("無法解碼 %s: %w", entry.Name, err)
-	}
-
-	bounds := decoded.Bounds()
-	width, height := scaledDimensions(bounds.Dx(), bounds.Dy(), maxDimension)
-	thumbnail := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.BiLinear.Scale(thumbnail, thumbnail.Bounds(), decoded, bounds, draw.Over, nil)
-
-	var encoded bytes.Buffer
-	thumbnailEncoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := thumbnailEncoder.Encode(&encoded, thumbnail); err != nil {
-		return ImagePayload{}, err
-	}
-	thumbnailData := encoded.Bytes()
 	if cachePathErr == nil {
-		_ = writeThumbnailCache(cachePath, thumbnailData)
+		if currentPath, err := thumbnailCachePath(entry, maxDimension); err == nil && currentPath == cachePath {
+			_ = a.thumbnails.store(cachePath, thumbnailData)
+		}
 	}
 	return thumbnailPayloadFromData(entry, thumbnailData), nil
 }
 
 func (a *App) LoadDocumentByPath(filePath string) (DocumentPayload, error) {
+	ctx := a.operationContext(0)
+	if err := checkOperation(ctx); err != nil {
+		return DocumentPayload{}, err
+	}
 	filePath = strings.TrimSpace(filePath)
 	if filePath == "" {
 		return DocumentPayload{}, errors.New("文件路徑不可空白")
@@ -455,7 +470,7 @@ func (a *App) LoadDocumentByPath(filePath string) (DocumentPayload, error) {
 		return DocumentPayload{}, fmt.Errorf("不是支援的文字文件: %s", entry.Name)
 	}
 
-	data, err := readEntryLimited(entry, maxDocumentBytes)
+	data, err := readEntryLimitedWithContext(ctx, entry, maxDocumentBytes)
 	if err != nil {
 		return DocumentPayload{}, err
 	}
@@ -483,6 +498,7 @@ func (a *App) PrepareDocumentByPath(filePath string, operationID int64) (string,
 }
 
 func (a *App) ExportImages(images []ImageEntry, dialogTitle string, operationID int64) (ExportResult, error) {
+	defer a.FinishOperation(operationID)
 	if len(images) == 0 {
 		return ExportResult{}, errors.New("請先選擇要匯出的項目")
 	}
@@ -494,7 +510,6 @@ func (a *App) ExportImages(images []ImageEntry, dialogTitle string, operationID 
 		return ExportResult{}, err
 	}
 	operationCtx := a.operationContext(operationID)
-	defer a.FinishOperation(operationID)
 
 	result := ExportResult{Destination: destination}
 	usedNames := make(map[string]bool)
@@ -502,7 +517,14 @@ func (a *App) ExportImages(images []ImageEntry, dialogTitle string, operationID 
 		if err := checkOperation(operationCtx); err != nil {
 			return result, err
 		}
-		fileName := uniqueExportName(destination, entry.Name, usedNames)
+		fileName, nameErr := uniqueExportName(operationCtx, destination, entry.Name, usedNames)
+		if nameErr != nil {
+			if errors.Is(nameErr, errOperationCancelled) {
+				return result, nameErr
+			}
+			result.Skipped++
+			continue
+		}
 		if writeErr := copyEntryToFile(operationCtx, entry, filepath.Join(destination, fileName)); writeErr != nil {
 			if errors.Is(writeErr, errOperationCancelled) {
 				return result, writeErr
@@ -572,8 +594,10 @@ func (a *App) CalculateChecksum(entry ImageEntry, operationID int64) (string, er
 }
 
 func (a *App) ResetLibrary() {
-	a.entries.reset()
 	a.media.cleanup()
+	archiveZIPs.clear()
+	archiveTARs.clear()
+	a.entries.reset()
 }
 
 func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []string, enabledDocumentExtensions []string, enabledMediaExtensions []string, operationID int64) (DirectoryScanResult, error) {
@@ -630,13 +654,20 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 			continue
 		}
 
-		info, err := entry.Info()
-		if err != nil {
+		extension := normalizedExtension(childPath)
+		isContent := isEnabledExtension(extension, imageExtensionFilter) || isEnabledExtension(extension, documentExtensionFilter) || isEnabledExtension(extension, mediaExtensionFilter)
+		if !isContent && !isSupportedArchive(extension) {
 			continue
 		}
-
-		extension := normalizedExtension(childPath)
-		if isEnabledExtension(extension, imageExtensionFilter) || isEnabledExtension(extension, documentExtensionFilter) || isEnabledExtension(extension, mediaExtensionFilter) {
+		info, err := entry.Info()
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			// 檔案連結使用目標大小；不遞迴目錄連結，也不列出 FIFO／裝置。
+			info, err = os.Stat(childPath)
+		}
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if isContent {
 			image := buildFileImageEntry(childPath, info.Size())
 			node.Images = append(node.Images, image)
 			a.rememberImage(image)
@@ -678,7 +709,7 @@ func (a *App) LoadImage(id string) (ImagePayload, error) {
 		return ImagePayload{}, fmt.Errorf("找不到圖片: %s", id)
 	}
 
-	return loadImagePayload(entry)
+	return a.prepareImagePayload(a.operationContext(0), entry)
 }
 
 // OpenFileByPath 只驗證並註冊系統傳入的檔案，避免必須先完成整個目錄掃描。
@@ -704,7 +735,7 @@ func (a *App) LoadImageByPathWithOperation(filePath string, operationID int64) (
 		return ImagePayload{}, fmt.Errorf("不是支援的圖片: %s", entry.Name)
 	}
 	a.rememberImage(entry)
-	return loadImagePayloadWithContext(a.operationContext(operationID), entry)
+	return a.prepareImagePayload(a.operationContext(operationID), entry)
 }
 
 func (a *App) rememberImage(image ImageEntry) {
@@ -783,8 +814,8 @@ func entryByPath(filePath string) (ImageEntry, error) {
 	if err != nil {
 		return ImageEntry{}, err
 	}
-	if info.IsDir() {
-		return ImageEntry{}, fmt.Errorf("不是有效檔案: %s", absPath)
+	if !info.Mode().IsRegular() {
+		return ImageEntry{}, fmt.Errorf("不是有效檔案 %s: %w", absPath, errNotRegularFile)
 	}
 	if !isSupportedEntry(normalizedExtension(absPath)) {
 		return ImageEntry{}, fmt.Errorf("不支援的檔案格式: %s", normalizedExtension(absPath))
@@ -840,14 +871,7 @@ func thumbnailPayloadFromData(entry ImageEntry, data []byte) ImagePayload {
 }
 
 func validateImageData(entry ImageEntry, data []byte) error {
-	if entry.Format == ".svg" || entry.Format == ".heic" {
-		return nil
-	}
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("無法解析圖片 %s: %w", entry.Name, err)
-	}
-	return validateImageDimensions(config.Width, config.Height)
+	return validateImageReader(entry, bytes.NewReader(data), int64(len(data)))
 }
 
 func validateImageDimensions(width int, height int) error {
@@ -934,27 +958,34 @@ func (a *App) scanArchiveNode(operationCtx context.Context, archivePath string, 
 	if err != nil {
 		return archiveNode, err
 	}
+	childIndexes := make(map[string]map[string]int)
 	for _, image := range images {
-		addArchiveImageToNode(&archiveNode, image)
+		if err := checkOperation(operationCtx); err != nil {
+			return archiveNode, err
+		}
+		addArchiveImageToNode(&archiveNode, image, childIndexes)
 		a.rememberImage(image)
 	}
-	sortLibraryNode(&archiveNode)
+	if err := sortLibraryNodeWithContext(operationCtx, &archiveNode); err != nil {
+		return archiveNode, err
+	}
 	return archiveNode, nil
 }
 
 func scanZipArchiveImages(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool, mediaExtensionFilter map[string]bool) ([]ImageEntry, error) {
-	reader, err := zip.OpenReader(archivePath)
+	reader, err := openZIPFile(archivePath)
 	if err != nil {
 		return nil, err
 	}
 	defer reader.Close()
 
 	var images []ImageEntry
+	seen := make(map[string]bool)
 	for _, file := range reader.File {
 		if err := checkOperation(operationCtx); err != nil {
 			return nil, err
 		}
-		if file.FileInfo().IsDir() {
+		if !file.Mode().IsRegular() {
 			continue
 		}
 		entryName := normalizeZipEntryName(file)
@@ -965,13 +996,17 @@ func scanZipArchiveImages(operationCtx context.Context, archivePath string, imag
 		if !isEnabledExtension(extension, imageExtensionFilter) && !isEnabledExtension(extension, documentExtensionFilter) && !isEnabledExtension(extension, mediaExtensionFilter) {
 			continue
 		}
-		images = append(images, buildArchiveImageEntry(archivePath, entryName, int64(file.UncompressedSize64)))
+		entry := buildArchiveImageEntry(archivePath, entryName, int64(file.UncompressedSize64))
+		if !seen[entry.ID] {
+			images = append(images, entry)
+			seen[entry.ID] = true
+		}
 	}
 	return images, nil
 }
 
 func scanTarArchiveImages(operationCtx context.Context, archivePath string, imageExtensionFilter map[string]bool, documentExtensionFilter map[string]bool, mediaExtensionFilter map[string]bool) ([]ImageEntry, error) {
-	file, err := os.Open(archivePath)
+	file, err := openRegularFile(archivePath)
 	if err != nil {
 		return nil, err
 	}
@@ -985,8 +1020,9 @@ func scanTarArchiveImages(operationCtx context.Context, archivePath string, imag
 		defer closeSource()
 	}
 
-	reader := tar.NewReader(source)
+	reader := tar.NewReader(&contextReader{ctx: operationCtx, reader: source})
 	var images []ImageEntry
+	seen := make(map[string]bool)
 	for {
 		if err := checkOperation(operationCtx); err != nil {
 			return nil, err
@@ -998,7 +1034,7 @@ func scanTarArchiveImages(operationCtx context.Context, archivePath string, imag
 		if err != nil {
 			return images, err
 		}
-		if header.FileInfo().IsDir() {
+		if !isReadableTARHeader(header) {
 			continue
 		}
 		entryName := normalizeArchiveEntryName(header.Name)
@@ -1009,12 +1045,16 @@ func scanTarArchiveImages(operationCtx context.Context, archivePath string, imag
 		if !isEnabledExtension(extension, imageExtensionFilter) && !isEnabledExtension(extension, documentExtensionFilter) && !isEnabledExtension(extension, mediaExtensionFilter) {
 			continue
 		}
-		images = append(images, buildArchiveImageEntry(archivePath, entryName, header.Size))
+		entry := buildArchiveImageEntry(archivePath, entryName, header.Size)
+		if !seen[entry.ID] {
+			images = append(images, entry)
+			seen[entry.ID] = true
+		}
 	}
 	return images, nil
 }
 
-func addArchiveImageToNode(root *LibraryNode, image ImageEntry) {
+func addArchiveImageToNode(root *LibraryNode, image ImageEntry, childIndexes map[string]map[string]int) {
 	innerDirectory := path.Dir(image.InnerPath)
 	if innerDirectory == "." || innerDirectory == "" {
 		root.Images = append(root.Images, image)
@@ -1033,14 +1073,14 @@ func addArchiveImageToNode(root *LibraryNode, image ImageEntry) {
 			accumulated += "/" + part
 		}
 		virtualPath := root.Path + "::" + accumulated
-		childIndex := -1
-		for index := range current.Children {
-			if current.Children[index].Path == virtualPath {
-				childIndex = index
-				break
-			}
+		indexes := childIndexes[current.Path]
+		if indexes == nil {
+			indexes = make(map[string]int)
+			childIndexes[current.Path] = indexes
 		}
-		if childIndex < 0 {
+		// Store slice indices, not pointers that append may invalidate.
+		childIndex, exists := indexes[part]
+		if !exists {
 			current.Children = append(current.Children, LibraryNode{
 				ID:       hashID("archive-dir", virtualPath),
 				Name:     part,
@@ -1051,6 +1091,7 @@ func addArchiveImageToNode(root *LibraryNode, image ImageEntry) {
 				Children: []LibraryNode{},
 			})
 			childIndex = len(current.Children) - 1
+			indexes[part] = childIndex
 		}
 		current = &current.Children[childIndex]
 	}
@@ -1058,18 +1099,32 @@ func addArchiveImageToNode(root *LibraryNode, image ImageEntry) {
 }
 
 func sortLibraryNode(node *LibraryNode) {
-	sort.SliceStable(node.Images, func(i, j int) bool {
-		return strings.ToLower(node.Images[i].Name) < strings.ToLower(node.Images[j].Name)
-	})
-	sort.SliceStable(node.Children, func(i, j int) bool {
-		if node.Children[i].Kind != node.Children[j].Kind {
-			return kindRank(node.Children[i].Kind) < kindRank(node.Children[j].Kind)
+	_ = sortLibraryNodeWithContext(context.Background(), node)
+}
+
+func sortLibraryNodeWithContext(ctx context.Context, root *LibraryNode) error {
+	pending := []*LibraryNode{root}
+	for len(pending) > 0 {
+		if err := checkOperation(ctx); err != nil {
+			return err
 		}
-		return strings.ToLower(node.Children[i].Name) < strings.ToLower(node.Children[j].Name)
-	})
-	for index := range node.Children {
-		sortLibraryNode(&node.Children[index])
+		node := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		sort.SliceStable(node.Images, func(i, j int) bool {
+			return strings.ToLower(node.Images[i].Name) < strings.ToLower(node.Images[j].Name)
+		})
+		sort.SliceStable(node.Children, func(i, j int) bool {
+			if node.Children[i].Kind != node.Children[j].Kind {
+				return kindRank(node.Children[i].Kind) < kindRank(node.Children[j].Kind)
+			}
+			return strings.ToLower(node.Children[i].Name) < strings.ToLower(node.Children[j].Name)
+		})
+
+		for index := range node.Children {
+			pending = append(pending, &node.Children[index])
+		}
 	}
+	return checkOperation(ctx)
 }
 
 func readEntryLimited(entry ImageEntry, limit int64) ([]byte, error) {
@@ -1112,6 +1167,8 @@ func thumbnailCachePath(entry ImageEntry, maxDimension int) (string, error) {
 		filepath.Clean(sourcePath),
 		entry.InnerPath,
 		strconv.FormatInt(entry.Size, 10),
+		strconv.FormatInt(info.Size(), 10),
+		thumbnailFileIdentity(info),
 		strconv.FormatInt(info.ModTime().UnixNano(), 10),
 		strconv.Itoa(maxDimension),
 	}, "\x00")
@@ -1120,14 +1177,34 @@ func thumbnailCachePath(entry ImageEntry, maxDimension int) (string, error) {
 }
 
 func readThumbnailCache(cachePath string) ([]byte, error) {
-	info, err := os.Stat(cachePath)
+	cachedInfo, err := os.Lstat(cachePath)
 	if err != nil {
 		return nil, err
 	}
-	if info.Size() <= 0 || info.Size() > maxThumbnailCacheBytes {
+	if !cachedInfo.Mode().IsRegular() {
+		return nil, errors.New("縮圖快取不是一般檔案")
+	}
+	file, err := openRegularFile(cachePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxThumbnailCacheBytes {
 		return nil, errors.New("縮圖快取大小無效")
 	}
-	return os.ReadFile(cachePath)
+	// A file may grow after Stat. Bound the read itself, not just its initial metadata.
+	data, err := io.ReadAll(io.LimitReader(file, maxThumbnailCacheBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || int64(len(data)) > maxThumbnailCacheBytes {
+		return nil, errors.New("縮圖快取大小無效")
+	}
+	return data, nil
 }
 
 func writeThumbnailCache(cachePath string, data []byte) error {
@@ -1157,38 +1234,12 @@ func writeThumbnailCache(cachePath string, data []byte) error {
 	return os.Rename(temporaryPath, cachePath)
 }
 
-func pruneCacheFiles(cacheDirectory string, maxFiles int) {
-	entries, err := os.ReadDir(cacheDirectory)
-	if err != nil || len(entries) <= maxFiles {
-		return
-	}
-	type cacheFile struct {
-		path    string
-		modTime int64
-	}
-	cacheFiles := make([]cacheFile, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, infoErr := entry.Info()
-		if infoErr == nil {
-			cacheFiles = append(cacheFiles, cacheFile{path: filepath.Join(cacheDirectory, entry.Name()), modTime: info.ModTime().UnixNano()})
-		}
-	}
-	sort.Slice(cacheFiles, func(left int, right int) bool { return cacheFiles[left].modTime < cacheFiles[right].modTime })
-	for len(cacheFiles) > maxFiles {
-		_ = os.Remove(cacheFiles[0].path)
-		cacheFiles = cacheFiles[1:]
-	}
-}
-
 func openEntryReader(operationCtx context.Context, entry ImageEntry) (io.ReadCloser, error) {
 	if err := checkOperation(operationCtx); err != nil {
 		return nil, err
 	}
 	if entry.Source == "file" {
-		file, err := os.Open(entry.Path)
+		file, err := openRegularFile(entry.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -1201,35 +1252,15 @@ func openEntryReader(operationCtx context.Context, entry ImageEntry) (io.ReadClo
 }
 
 func openZipEntryReader(operationCtx context.Context, entry ImageEntry) (io.ReadCloser, error) {
-	reader, err := zip.OpenReader(entry.ArchivePath)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, file := range reader.File {
-		if err := checkOperation(operationCtx); err != nil {
-			_ = reader.Close()
-			return nil, err
-		}
-		if strings.Trim(path.Clean(normalizeZipEntryName(file)), "/") != entry.InnerPath {
-			continue
-		}
-		opened, err := file.Open()
-		if err != nil {
-			_ = reader.Close()
-			return nil, err
-		}
-		return &combinedReadCloser{
-			Reader:  &contextReader{ctx: operationCtx, reader: opened},
-			closers: []io.Closer{opened, reader},
-		}, nil
-	}
-	_ = reader.Close()
-	return nil, fmt.Errorf("壓縮檔內找不到內容: %s", entry.InnerPath)
+	return archiveZIPs.open(operationCtx, entry)
 }
 
 func openTarEntryReader(operationCtx context.Context, entry ImageEntry) (io.ReadCloser, error) {
-	file, err := os.Open(entry.ArchivePath)
+	return archiveTARs.open(operationCtx, entry)
+}
+
+func openTarEntryReaderUncached(operationCtx context.Context, entry ImageEntry) (io.ReadCloser, error) {
+	file, err := openRegularFile(entry.ArchivePath)
 	if err != nil {
 		return nil, err
 	}
@@ -1246,7 +1277,7 @@ func openTarEntryReader(operationCtx context.Context, entry ImageEntry) (io.Read
 	closers = append(closers, file)
 	_ = closeSource
 
-	reader := tar.NewReader(source)
+	reader := tar.NewReader(&contextReader{ctx: operationCtx, reader: source})
 	for {
 		if err := checkOperation(operationCtx); err != nil {
 			_ = closeReaders(closers)
@@ -1259,6 +1290,9 @@ func openTarEntryReader(operationCtx context.Context, entry ImageEntry) (io.Read
 		if err != nil {
 			_ = closeReaders(closers)
 			return nil, err
+		}
+		if !isReadableTARHeader(header) {
+			continue
 		}
 		if strings.Trim(path.Clean(normalizeArchiveEntryName(header.Name)), "/") == entry.InnerPath {
 			return &combinedReadCloser{
@@ -1314,7 +1348,12 @@ func (reader *contextReader) Read(buffer []byte) (int, error) {
 	if err := checkOperation(reader.ctx); err != nil {
 		return 0, err
 	}
-	return reader.reader.Read(buffer)
+	n, err := reader.reader.Read(buffer)
+	// 底層可同時回傳資料與 EOF；最後一次讀取也不能吞掉取消。
+	if cancelErr := checkOperation(reader.ctx); cancelErr != nil {
+		return n, cancelErr
+	}
+	return n, err
 }
 
 func checkOperation(operationCtx context.Context) error {
@@ -1344,7 +1383,7 @@ func hashEntry(operationCtx context.Context, entry ImageEntry) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func copyEntryToFile(operationCtx context.Context, entry ImageEntry, destinationPath string) error {
+func copyEntryToFile(operationCtx context.Context, entry ImageEntry, destinationPath string) (resultErr error) {
 	reader, err := openEntryReader(operationCtx, entry)
 	if err != nil {
 		return err
@@ -1355,12 +1394,24 @@ func copyEntryToFile(operationCtx context.Context, entry ImageEntry, destination
 	if err != nil {
 		return err
 	}
+	createdInfo, err := output.Stat()
+	if err != nil {
+		_ = output.Close()
+		return err
+	}
 	completed := false
 	defer func() {
-		_ = output.Close()
 		if !completed {
-			_ = os.Remove(destinationPath)
+			// 新檔在 ExFAT 配置資料區塊後可能換 inode，仍開啟的 FD
+			// 才能識別本次輸出；刪除前也檢查路徑未被其他工作替換。
+			if current, statErr := output.Stat(); statErr == nil {
+				createdInfo = current
+			}
+			if err := removeFileIfSame(destinationPath, createdInfo); err != nil {
+				resultErr = errors.Join(resultErr, err)
+			}
 		}
+		_ = output.Close()
 	}()
 
 	written, err := io.Copy(output, io.LimitReader(reader, maxExportBytes+1))
@@ -1369,6 +1420,23 @@ func copyEntryToFile(operationCtx context.Context, entry ImageEntry, destination
 	}
 	if written > maxExportBytes {
 		return fmt.Errorf("%s 超過匯出上限 %d GB", entry.Name, maxExportBytes/1024/1024/1024)
+	}
+	if err := checkOperation(operationCtx); err != nil {
+		return err
+	}
+	if err := output.Sync(); err != nil {
+		return err
+	}
+	createdInfo, err = output.Stat()
+	if err != nil {
+		return err
+	}
+	currentTarget, err := os.Lstat(destinationPath)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(createdInfo, currentTarget) {
+		return fmt.Errorf("匯出期間目的地已變更: %s", destinationPath)
 	}
 	if err := output.Close(); err != nil {
 		return err
@@ -1387,22 +1455,34 @@ func scaledDimensions(width int, height int, maxDimension int) (int, int) {
 	return max(1, width*maxDimension/height), maxDimension
 }
 
-func uniqueExportName(destination string, originalName string, usedNames map[string]bool) string {
+func uniqueExportName(ctx context.Context, destination string, originalName string, usedNames map[string]bool) (string, error) {
 	name := filepath.Base(originalName)
+	if name == "." || name == string(filepath.Separator) || len(name) > 255 {
+		return "", errors.New("匯出檔名無效或超過 255 bytes")
+	}
 	extension := filepath.Ext(name)
 	baseName := strings.TrimSuffix(name, extension)
-	for index := 0; ; index++ {
+	for index := 0; index < 10000; index++ {
+		if err := checkOperation(ctx); err != nil {
+			return "", err
+		}
 		candidate := name
 		if index > 0 {
 			candidate = fmt.Sprintf("%s-%d%s", baseName, index+1, extension)
 		}
+		if len(candidate) > 255 {
+			return "", errors.New("匯出檔名超過 255 bytes")
+		}
 		if usedNames[candidate] {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(destination, candidate)); errors.Is(err, os.ErrNotExist) {
-			return candidate
+		if _, err := os.Lstat(filepath.Join(destination, candidate)); errors.Is(err, os.ErrNotExist) {
+			return candidate, nil
+		} else if err != nil {
+			return "", err
 		}
 	}
+	return "", errors.New("找不到可用的匯出檔名")
 }
 
 func normalizedExtension(filePath string) string {
@@ -1656,6 +1736,10 @@ func normalizeZipEntryName(file *zip.File) string {
 }
 
 func normalizeArchiveEntryName(entryName string) string {
+	// Valid UTF-8 is already decoded; guessing legacy encodings can corrupt it.
+	if utf8.ValidString(entryName) && !strings.ContainsRune(entryName, utf8.RuneError) {
+		return entryName
+	}
 	raw := []byte(entryName)
 	candidates := []string{}
 	if utf8.Valid(raw) {

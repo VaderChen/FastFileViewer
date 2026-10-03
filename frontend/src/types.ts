@@ -82,6 +82,7 @@ export interface TrashResult {
 }
 
 export interface MoveResult {
+  originalIds: Record<string, string>;
   moved: ImageEntry[];
   failed: FileOperationFailure[];
 }

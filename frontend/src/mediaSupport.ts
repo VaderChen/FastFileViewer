@@ -228,7 +228,7 @@ function convertASS(text: string): string | null {
     const start = assTimeToVTT(values[fields.indexOf('start')] ?? '');
     const end = assTimeToVTT(values[fields.indexOf('end')] ?? '');
     const rawText = values[fields.indexOf('text')] ?? '';
-    const cueText = escapeVTTText(rawText.replace(/\{[^}]*\}/g, '').replace(/\\[Nn]/g, '\n').replace(/\\h/g, ' ').trim());
+    const cueText = escapeVTTText(removeDelimitedSections(rawText, '{', '}').replace(/\\[Nn]/g, '\n').replace(/\\h/g, ' ').trim());
     if (start && end && cueText) {
       cues.push(`${start} --> ${end}\n${cueText}`);
     }
@@ -237,19 +237,23 @@ function convertASS(text: string): string | null {
 }
 
 function convertSMI(text: string): string | null {
-  const syncPattern = /<sync\b[^>]*\bstart\s*=\s*["']?(\d+)/gi;
-  const matches = Array.from(text.matchAll(syncPattern));
+  const matches: { start: number; index: number; contentStart: number }[] = [];
+  for (const match of text.matchAll(/<sync\b[^<>]*>/gi)) {
+    const timing = match[0].match(/\bstart\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+)(?=\s|>))/i);
+    if (timing) {
+      matches.push({ start: Number(timing[1] ?? timing[2] ?? timing[3]), index: match.index, contentStart: match.index + match[0].length });
+    }
+  }
   const cues: string[] = [];
   for (let index = 0; index < matches.length; index += 1) {
     const current = matches[index];
     const next = matches[index + 1];
-    const start = Number(current[1]);
-    const end = next ? Number(next[1]) : start + 4000;
-    const segmentStart = (current.index ?? 0) + current[0].length;
+    const start = current.start;
+    const end = next ? next.start : start + 4000;
+    const segmentStart = current.contentStart;
     const segmentEnd = next?.index ?? text.length;
-    const cueText = escapeVTTText(decodeBasicEntities(text.slice(segmentStart, segmentEnd)
-      .replace(/<br\s*\/?\s*>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
+    const cueText = escapeVTTText(decodeBasicEntities(removeDelimitedSections(text.slice(segmentStart, segmentEnd)
+      .replace(/<br\s*\/?\s*>/gi, '\n'), '<', '>')
       .replace(/&nbsp;/gi, ' ')
       .trim()));
     if (Number.isFinite(start) && Number.isFinite(end) && end > start && cueText) {
@@ -266,7 +270,7 @@ function convertSUB(text: string): string | null {
     if (microDVD) {
       const start = Math.round(Number(microDVD[1]) * 1000 / 25);
       const end = Math.round(Number(microDVD[2]) * 1000 / 25);
-      const cueText = escapeVTTText(microDVD[3].replace(/\|/g, '\n').replace(/\{[^}]*\}/g, '').trim());
+      const cueText = escapeVTTText(removeDelimitedSections(microDVD[3].replace(/\|/g, '\n'), '{', '}').trim());
       if (end > start && cueText) {
         cues.push(`${millisecondsToVTT(start)} --> ${millisecondsToVTT(end)}\n${cueText}`);
       }
@@ -334,11 +338,35 @@ function escapeVTTText(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// 搜尋不到結尾時保留剩餘文字，避免大量未閉合標記造成正規表示式反覆掃描。
+function removeDelimitedSections(value: string, opening: string, closing: string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  for (;;) {
+    const start = value.indexOf(opening, cursor);
+    if (start < 0) break;
+    const end = value.indexOf(closing, start + opening.length);
+    if (end < 0) break;
+    parts.push(value.slice(cursor, start));
+    cursor = end + closing.length;
+  }
+  parts.push(value.slice(cursor));
+  return parts.join('');
+}
+
+export function decodeSubtitleText(value: string): string {
+  // 先去除實際標記再解碼，讓 &lt;文字&gt; 仍顯示為字面內容。
+  return decodeBasicEntities(removeDelimitedSections(value, '<', '>'));
+}
+
 function decodeBasicEntities(value: string): string {
   return value
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&nbsp;/gi, '\u00a0')
+    .replace(/&lrm;/gi, '\u200e')
+    .replace(/&rlm;/gi, '\u200f')
     .replace(/&amp;/gi, '&');
 }

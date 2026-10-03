@@ -22,6 +22,21 @@ func (r *entryRegistry) remember(entry ImageEntry) {
 	r.entries[entry.ID] = entry
 }
 
+// replace retires the previous path in the same critical section as publishing
+// its replacement; a moved or renamed entry must not keep serving its old URL.
+func (r *entryRegistry) replace(previousID string, entry ImageEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.entries, previousID)
+	r.entries[entry.ID] = entry
+}
+
+func (r *entryRegistry) forget(entryID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.entries, entryID)
+}
+
 func (r *entryRegistry) lookup(entryID string) (ImageEntry, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -46,17 +61,41 @@ type operationRegistry struct {
 	operations map[int64]operationState
 	nextID     atomic.Int64
 	parent     context.Context
+	stopParent context.CancelFunc
+	closed     bool
 }
 
 func newOperationRegistry() *operationRegistry {
-	return &operationRegistry{operations: make(map[int64]operationState)}
+	parent, cancel := context.WithCancel(context.Background())
+	return &operationRegistry{operations: make(map[int64]operationState), parent: parent, stopParent: cancel}
 }
 
 // adopt 會把應用程式的生命週期 context 設為之後所有操作的父節點。
 func (r *operationRegistry) adopt(parent context.Context) {
+	if parent == nil {
+		parent = context.Background()
+	}
 	r.mu.Lock()
-	r.parent = parent
+	previous := r.stopParent
+	r.parent, r.stopParent = context.WithCancel(parent)
+	r.closed = false
+	r.operations = make(map[int64]operationState)
 	r.mu.Unlock()
+	if previous != nil {
+		previous()
+	}
+}
+
+// close 也取消不需要 UI 操作 ID 的讀取，並丟棄尚未 Finish 的狀態。
+func (r *operationRegistry) close() {
+	r.mu.Lock()
+	r.closed = true
+	cancel := r.stopParent
+	r.operations = make(map[int64]operationState)
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (r *operationRegistry) begin() int64 {
@@ -65,6 +104,10 @@ func (r *operationRegistry) begin() int64 {
 	parent := r.parent
 	if parent == nil {
 		parent = context.Background()
+	}
+	if r.closed || parent.Err() != nil {
+		r.mu.Unlock()
+		return operationID
 	}
 	ctx, cancel := context.WithCancel(parent)
 	r.operations[operationID] = operationState{ctx: ctx, cancel: cancel}
@@ -93,10 +136,12 @@ func (r *operationRegistry) finish(operationID int64) {
 
 // context 會回傳操作的 context；找不到的操作視為已取消。
 func (r *operationRegistry) context(operationID int64) context.Context {
-	if operationID == 0 {
-		return context.Background()
-	}
 	r.mu.Lock()
+	if operationID == 0 {
+		parent := r.parent
+		r.mu.Unlock()
+		return parent
+	}
 	operation, ok := r.operations[operationID]
 	r.mu.Unlock()
 	if !ok || operation.ctx == nil {

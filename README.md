@@ -45,10 +45,9 @@
 ## 開發需求
 
 - Apple Silicon Mac 與 macOS 12 或更新版本
-- Go 1.26.4 或相容版本
+- Go 1.26.6 或相容版本
 - Node.js 與 npm
 - Xcode Command Line Tools
-- `rsync`
 - `pkg-config`、libopus、libvpx（建立內建 LGPL FFmpeg 時需要，可用 `brew install pkg-config opus libvpx` 安裝）
 
 建置腳本會使用 `go.mod` 指定的 Wails v2 版本。
@@ -66,7 +65,7 @@ cd FastFileViewer
 ./run.sh
 ```
 
-`run.sh` 會在本機暫存目錄建立開發鏡像，避免外接磁碟上的 AppleDouble 檔案與大量小檔案影響 Wails。
+`run.sh` 會直接在專案目錄啟動 Wails，前端依賴安裝於 `frontend/node_modules`，指定版本的 Wails CLI 安裝於 `build/tools`。
 
 ## 建置 macOS App
 
@@ -83,7 +82,7 @@ dist/FastFileViewer.app
 
 建置流程會執行 Go vet、race test、前端測試與 npm audit，並在 App Bundle 的 `Contents/Resources` 中加入：
 
-- `Licenses/GPL-3.0.txt`
+- `Licenses/LICENSE*.md`
 - `Licenses/THIRD-PARTY-NOTICES.md`
 - `Licenses/THIRD-PARTY-LICENSES.txt`
 - `build-metadata.json`

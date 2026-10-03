@@ -19,6 +19,9 @@ import (
 const mediaURLPrefix = "/media/"
 const documentURLPrefix = "/document/"
 
+const maxMediaDiagnosticBytes = 64 * 1024
+const maxMediaProbeBytes = 1024 * 1024
+
 var (
 	findFFmpegExecutable  = findFFmpeg
 	findFFprobeExecutable = findFFprobe
@@ -29,6 +32,10 @@ var (
 func NewMediaMiddleware(service *MediaService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			if strings.HasPrefix(request.URL.Path, imageURLPrefix) {
+				service.serveImage(response, request)
+				return
+			}
 			if strings.HasPrefix(request.URL.Path, mediaURLPrefix) {
 				service.serveMedia(response, request)
 				return
@@ -48,14 +55,20 @@ type MediaService struct {
 	entries    *entryRegistry
 	operations *operationRegistry
 	// cacheMu 只保護下列快取索引，實際的解壓與轉檔改用 per-entry 鎖。
-	cacheMu    sync.Mutex
-	cacheDir   string
-	cacheFiles map[string]string
+	cacheMu      sync.Mutex
+	cacheDir     string
+	cacheFiles   map[string]string
+	cacheSources map[string]mediaSourceFingerprint
 	// remuxPrompted 記錄已經詢問過是否清除原始影片的項目，避免重複打擾。
 	remuxPrompted map[string]bool
 	// prepareMu 只保護 prepareLocks，讓不同影音不會互相等待。
 	prepareMu    sync.Mutex
 	prepareLocks map[string]*mediaPrepareLock
+	// 清理先取消本輪工作，再等所有持有者離開，避免移除使用中的暫存目錄。
+	lifecycleMu  sync.RWMutex
+	cleanupMu    sync.Mutex
+	cacheContext context.Context
+	cancelCache  context.CancelFunc
 }
 
 func newMediaService(entries *entryRegistry, operations *operationRegistry) *MediaService {
@@ -63,6 +76,7 @@ func newMediaService(entries *entryRegistry, operations *operationRegistry) *Med
 		entries:       entries,
 		operations:    operations,
 		cacheFiles:    make(map[string]string),
+		cacheSources:  make(map[string]mediaSourceFingerprint),
 		remuxPrompted: make(map[string]bool),
 		prepareLocks:  make(map[string]*mediaPrepareLock),
 	}
@@ -81,9 +95,15 @@ func (s *MediaService) PrepareMediaByPath(filePath string, operationID int64) (s
 	if entry.Kind != "video" && entry.Kind != "audio" {
 		return "", fmt.Errorf("不是支援的影音檔案: %s", entry.Name)
 	}
-	operationCtx := s.operations.context(operationID)
+	operationCtx, finish := s.beginMediaWork(s.operations.context(operationID))
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(operationCtx, entry.ID)
+	if err != nil {
+		return "", err
+	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
 	if entry.Kind == "audio" && requiresAudioCompatibility(entry.Format) {
-		return s.prepareCompatibleAudio(operationCtx, entry)
+		return s.prepareCompatibleAudioLocked(operationCtx, entry)
 	}
 	if requiresVideoRemux(entry.Format) {
 		if _, err := findFFmpegExecutable(); err != nil {
@@ -92,9 +112,12 @@ func (s *MediaService) PrepareMediaByPath(filePath string, operationID int64) (s
 	}
 	// 需要解壓或改封裝的項目先在這裡備妥，播放時的 range 要求就不會再觸發長時間工作。
 	if entry.Source == "archive" || requiresVideoRemux(entry.Format) {
-		if _, err := s.seekableMediaPath(operationCtx, entry); err != nil {
+		if _, err := s.seekableMediaPathLocked(operationCtx, entry); err != nil {
 			return "", err
 		}
+	}
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
 	}
 	s.entries.remember(entry)
 	return mediaURLPrefix + url.PathEscape(entry.ID), nil
@@ -114,8 +137,15 @@ func (s *MediaService) PrepareDocumentByPath(filePath string, operationID int64)
 	if entry.Kind != "pdf" {
 		return "", fmt.Errorf("不是支援的 PDF 文件: %s", entry.Name)
 	}
+	operationCtx, finish := s.beginMediaWork(s.operations.context(operationID))
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(operationCtx, entry.ID)
+	if err != nil {
+		return "", err
+	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
 	if entry.Source == "archive" {
-		if _, err := s.seekableMediaPath(s.operations.context(operationID), entry); err != nil {
+		if _, err := s.seekableMediaPathLocked(operationCtx, entry); err != nil {
 			return "", err
 		}
 	} else {
@@ -127,6 +157,9 @@ func (s *MediaService) PrepareDocumentByPath(filePath string, operationID int64)
 			return "", fmt.Errorf("%s 超過預覽上限 %d GB", entry.Name, maxExportBytes/(1024*1024*1024))
 		}
 		entry.Size = info.Size()
+	}
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
 	}
 	s.entries.remember(entry)
 	return documentURLPrefix + url.PathEscape(entry.ID), nil
@@ -145,7 +178,18 @@ func (s *MediaService) PrepareCompatibleMediaByPath(filePath string, operationID
 }
 
 func (s *MediaService) prepareCompatibleAudio(operationCtx context.Context, entry ImageEntry) (string, error) {
-	playablePath, err := s.compatibleAudioPath(operationCtx, entry)
+	operationCtx, finish := s.beginMediaWork(operationCtx)
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(operationCtx, entry.ID)
+	if err != nil {
+		return "", err
+	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
+	return s.prepareCompatibleAudioLocked(operationCtx, entry)
+}
+
+func (s *MediaService) prepareCompatibleAudioLocked(operationCtx context.Context, entry ImageEntry) (string, error) {
+	playablePath, err := s.compatibleAudioPathLocked(operationCtx, entry)
 	if err != nil {
 		return "", err
 	}
@@ -163,16 +207,37 @@ func (s *MediaService) prepareCompatibleAudio(operationCtx context.Context, entr
 	compatibleEntry.InnerPath = ""
 	compatibleEntry.Format = ".m4a"
 	compatibleEntry.Size = info.Size()
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
+	}
 	s.entries.remember(compatibleEntry)
 	return mediaURLPrefix + url.PathEscape(compatibleEntry.ID), nil
 }
 
 // ReleasePlaybackCache 會在關閉播放器或切換檔案時，移除為了播放而產生的暫存影音，避免長期佔用磁碟空間。
 func (s *MediaService) ReleasePlaybackCache(filePath string) error {
-	entry, err := entryByPath(filePath)
+	// 原檔可能已經移動、刪除或改成資料夾；釋放只需要穩定的路徑 ID，不讀取來源。
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return errors.New("檔案路徑不可空白")
+	}
+	var entry ImageEntry
+	if archivePath, innerPath, ok := splitArchiveEntryPath(filePath); ok {
+		entry = buildArchiveImageEntry(archivePath, innerPath, 0)
+	} else {
+		absolutePath, err := filepath.Abs(filePath)
+		if err != nil {
+			return err
+		}
+		entry = buildFileImageEntry(absolutePath, 0)
+	}
+	ctx, finish := s.beginMediaWork(context.Background())
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(ctx, entry.ID)
 	if err != nil {
 		return err
 	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	for _, cacheKey := range []string{entry.ID, entry.ID + "-compatible-audio"} {
@@ -181,8 +246,12 @@ func (s *MediaService) ReleasePlaybackCache(filePath string) error {
 		if !s.isInsideMediaCache(cachedPath) {
 			continue
 		}
-		_ = os.Remove(cachedPath)
+		if err := os.Remove(cachedPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("移除播放暫存檔失敗: %w", err)
+		}
 		delete(s.cacheFiles, cacheKey)
+		delete(s.cacheSources, cacheKey)
+		delete(s.remuxPrompted, cacheKey)
 	}
 	return nil
 }
@@ -197,6 +266,13 @@ func (s *MediaService) ReplaceRemuxedOriginal(filePath string) (ImageEntry, erro
 	if s.ctx == nil || entry.Source != "file" || !requiresVideoRemux(entry.Format) {
 		return ImageEntry{}, nil
 	}
+	ctx, finish := s.beginMediaWork(context.Background())
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(ctx, entry.ID)
+	if err != nil {
+		return ImageEntry{}, err
+	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
 	cachedPath, ok := s.claimRemuxPrompt(entry.ID)
 	if !ok {
 		return ImageEntry{}, nil
@@ -206,21 +282,55 @@ func (s *MediaService) ReplaceRemuxedOriginal(filePath string) (ImageEntry, erro
 	if _, err := os.Stat(targetPath); err == nil {
 		return ImageEntry{}, nil
 	}
-	return s.replaceOriginalWithRemux(entry, cachedPath, targetPath)
+	replacement, err := s.replaceOriginalWithRemuxLocked(ctx, entry, cachedPath, targetPath)
+	if err != nil {
+		s.cacheMu.Lock()
+		delete(s.remuxPrompted, entry.ID)
+		s.cacheMu.Unlock()
+	}
+	return replacement, err
 }
 
 // replaceOriginalWithRemux 會先確保改封裝結果落在原資料夾，成功後才把原始影片移到垃圾桶。
 func (s *MediaService) replaceOriginalWithRemux(entry ImageEntry, cachedPath string, targetPath string) (ImageEntry, error) {
-	if err := duplicateFile(cachedPath, targetPath); err != nil {
+	ctx, finish := s.beginMediaWork(context.Background())
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(ctx, entry.ID)
+	if err != nil {
+		return ImageEntry{}, err
+	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
+	return s.replaceOriginalWithRemuxLocked(ctx, entry, cachedPath, targetPath)
+}
+
+func (s *MediaService) replaceOriginalWithRemuxLocked(ctx context.Context, entry ImageEntry, cachedPath string, targetPath string) (ImageEntry, error) {
+	s.cacheMu.Lock()
+	source := s.cacheSources[entry.ID]
+	current := s.cacheFiles[entry.ID] == cachedPath && s.isInsideMediaCache(cachedPath)
+	s.cacheMu.Unlock()
+	if !current || !source.matches() {
+		return ImageEntry{}, errors.New("原始影片或播放快取已變更，請重新開啟後再保存")
+	}
+	if err := duplicateFileWithContext(ctx, cachedPath, targetPath); err != nil {
 		return ImageEntry{}, fmt.Errorf("保存改封裝結果失敗: %w", err)
 	}
-	if err := moveToTrash(entry.Path); err != nil {
+	// 跨磁碟複製可能耗時；在移走原檔前再次驗證來源並檢查取消。
+	if err := checkOperation(ctx); err != nil {
+		_ = os.Remove(targetPath)
+		return ImageEntry{}, err
+	}
+	if !source.matches() {
+		_ = os.Remove(targetPath)
+		return ImageEntry{}, errors.New("原始影片在保存期間已變更，已保留原檔")
+	}
+	if err := moveToTrashWithContext(ctx, entry.Path); err != nil {
 		_ = os.Remove(targetPath)
 		return ImageEntry{}, fmt.Errorf("將原始影片移到垃圾桶失敗: %w", err)
 	}
 	// 播放中的請求仍指向舊項目，快取索引必須改指到保存後的檔案。
 	s.cacheMu.Lock()
 	s.cacheFiles[entry.ID] = targetPath
+	delete(s.cacheSources, entry.ID)
 	s.cacheMu.Unlock()
 	_ = os.Remove(cachedPath)
 
@@ -245,7 +355,7 @@ func (s *MediaService) claimRemuxPrompt(entryID string) (string, bool) {
 	return cachedPath, true
 }
 
-// isInsideMediaCache 需在持有 mediaCacheMu 時呼叫。
+// isInsideMediaCache 需在持有 cacheMu 時呼叫。
 func (s *MediaService) isInsideMediaCache(candidatePath string) bool {
 	if s.cacheDir == "" || candidatePath == "" {
 		return false
@@ -281,14 +391,13 @@ func (s *MediaService) serveMedia(response http.ResponseWriter, request *http.Re
 		return
 	}
 
-	mediaPath, err := s.seekableMediaPath(request.Context(), entry)
+	file, mediaPath, err := s.openMediaFile(request.Context(), entry)
 	if err != nil {
-		http.Error(response, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	file, err := os.Open(mediaPath)
-	if err != nil {
-		http.NotFound(response, request)
+		if os.IsNotExist(err) || errors.Is(err, errNotRegularFile) {
+			http.NotFound(response, request)
+		} else {
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	defer file.Close()
@@ -304,22 +413,51 @@ func (s *MediaService) serveMedia(response http.ResponseWriter, request *http.Re
 	http.ServeContent(response, request, entry.Name, info.ModTime(), file)
 }
 
+// openMediaFile 持鎖到取得檔案描述元；後續釋放快取不會中斷已開始的 HTTP 串流。
+func (s *MediaService) openMediaFile(ctx context.Context, entry ImageEntry) (*os.File, string, error) {
+	ctx, finish := s.beginMediaWork(ctx)
+	defer finish()
+	cacheKey := strings.TrimSuffix(entry.ID, "-compatible-audio")
+	lock, err := s.acquireMediaPrepareLock(ctx, cacheKey)
+	if err != nil {
+		return nil, "", err
+	}
+	defer s.releaseMediaPrepareLock(cacheKey, lock)
+	path, err := s.seekableMediaPathLocked(ctx, entry)
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := openRegularFile(path)
+	return file, path, err
+}
+
 func (s *MediaService) seekableMediaPath(operationCtx context.Context, entry ImageEntry) (string, error) {
+	operationCtx, finish := s.beginMediaWork(operationCtx)
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(operationCtx, entry.ID)
+	if err != nil {
+		return "", err
+	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
+	return s.seekableMediaPathLocked(operationCtx, entry)
+}
+
+func (s *MediaService) seekableMediaPathLocked(operationCtx context.Context, entry ImageEntry) (string, error) {
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
+	}
 	if entry.Source != "archive" && !requiresVideoRemux(entry.Format) {
 		return entry.Path, nil
 	}
-	if cachedPath, ok := s.lookupMediaCache(entry.ID); ok {
-		return cachedPath, nil
-	}
-
-	// 解壓與改封裝可能耗時數分鐘，只鎖住同一個項目，其他影音仍可同時準備與播放。
-	lock := s.acquireMediaPrepareLock(entry.ID)
-	defer s.releaseMediaPrepareLock(entry.ID, lock)
 	// 等鎖期間可能已由其他要求準備完成。
 	if cachedPath, ok := s.lookupMediaCache(entry.ID); ok {
 		return cachedPath, nil
 	}
 	if err := checkOperation(operationCtx); err != nil {
+		return "", err
+	}
+	source, err := fingerprintMediaSource(entry)
+	if err != nil {
 		return "", err
 	}
 	cacheDirectory, err := s.ensureMediaCacheDir()
@@ -330,7 +468,7 @@ func (s *MediaService) seekableMediaPath(operationCtx context.Context, entry Ima
 	sourcePath := entry.Path
 	removeSource := false
 	if entry.Source == "archive" {
-		extractedPath, err := s.extractMediaEntry(operationCtx, entry, cacheDirectory)
+		extractedPath, err := s.extractMediaEntry(operationCtx, entry, cacheDirectory, entry.ID)
 		if err != nil {
 			return "", err
 		}
@@ -345,40 +483,112 @@ func (s *MediaService) seekableMediaPath(operationCtx context.Context, entry Ima
 		if err != nil {
 			return "", err
 		}
-		s.storeMediaCache(entry.ID, playablePath)
+		if err := s.storeMediaCache(entry.ID, playablePath, source); err != nil {
+			return "", err
+		}
 		return playablePath, nil
 	}
-	s.storeMediaCache(entry.ID, sourcePath)
+	if err := s.storeMediaCache(entry.ID, sourcePath, source); err != nil {
+		return "", err
+	}
 	return sourcePath, nil
 }
 
-// mediaPrepareLock 讓同一個項目的準備工作互斥，不同項目則可以並行。
+// beginMediaWork 將操作取消與媒體清理取消合併；finish 必須在釋放項目鎖後呼叫。
+func (s *MediaService) beginMediaWork(ctx context.Context) (context.Context, func()) {
+	s.lifecycleMu.RLock()
+	s.cacheMu.Lock()
+	if s.cacheContext == nil {
+		s.cacheContext, s.cancelCache = context.WithCancel(context.Background())
+	}
+	cacheContext := s.cacheContext
+	s.cacheMu.Unlock()
+	operationCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(cacheContext, cancel)
+	if cacheContext.Err() != nil {
+		cancel()
+	}
+	return operationCtx, func() {
+		stop()
+		cancel()
+		s.lifecycleMu.RUnlock()
+	}
+}
+
+// mediaPrepareLock 讓同一項目的解壓、轉檔、保存與釋放互斥，等待時仍能取消。
 type mediaPrepareLock struct {
-	mu      sync.Mutex
+	token   chan struct{}
 	waiters int
 }
 
-func (s *MediaService) acquireMediaPrepareLock(cacheKey string) *mediaPrepareLock {
+func (s *MediaService) acquireMediaPrepareLock(ctx context.Context, cacheKey string) (*mediaPrepareLock, error) {
+	if err := checkOperation(ctx); err != nil {
+		return nil, err
+	}
 	s.prepareMu.Lock()
 	lock := s.prepareLocks[cacheKey]
 	if lock == nil {
-		lock = &mediaPrepareLock{}
+		lock = &mediaPrepareLock{token: make(chan struct{}, 1)}
+		lock.token <- struct{}{}
 		s.prepareLocks[cacheKey] = lock
 	}
 	lock.waiters++
 	s.prepareMu.Unlock()
-	lock.mu.Lock()
-	return lock
+	select {
+	case <-lock.token:
+		if err := checkOperation(ctx); err != nil {
+			s.releaseMediaPrepareLock(cacheKey, lock)
+			return nil, err
+		}
+		return lock, nil
+	case <-ctx.Done():
+		s.forgetMediaPrepareWaiter(cacheKey, lock)
+		return nil, checkOperation(ctx)
+	}
 }
 
 func (s *MediaService) releaseMediaPrepareLock(cacheKey string, lock *mediaPrepareLock) {
-	lock.mu.Unlock()
+	lock.token <- struct{}{}
+	s.forgetMediaPrepareWaiter(cacheKey, lock)
+}
+
+func (s *MediaService) forgetMediaPrepareWaiter(cacheKey string, lock *mediaPrepareLock) {
 	s.prepareMu.Lock()
 	lock.waiters--
 	if lock.waiters == 0 {
 		delete(s.prepareLocks, cacheKey)
 	}
 	s.prepareMu.Unlock()
+}
+
+type mediaSourceFingerprint struct {
+	path string
+	info os.FileInfo
+}
+
+func fingerprintMediaSource(entry ImageEntry) (mediaSourceFingerprint, error) {
+	path := entry.Path
+	if entry.Source == "archive" {
+		path = entry.ArchivePath
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return mediaSourceFingerprint{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return mediaSourceFingerprint{}, errors.New("媒體來源不是一般檔案")
+	}
+	return mediaSourceFingerprint{path: path, info: info}, nil
+}
+
+func (source mediaSourceFingerprint) matches() bool {
+	if source.info == nil {
+		return false
+	}
+	current, err := os.Stat(source.path)
+	return err == nil && os.SameFile(source.info, current) &&
+		source.info.Size() == current.Size() && source.info.ModTime().Equal(current.ModTime()) &&
+		thumbnailFileIdentity(source.info) == thumbnailFileIdentity(current)
 }
 
 func (s *MediaService) lookupMediaCache(cacheKey string) (string, bool) {
@@ -388,17 +598,32 @@ func (s *MediaService) lookupMediaCache(cacheKey string) (string, bool) {
 	if cachedPath == "" {
 		return "", false
 	}
-	if info, err := os.Stat(cachedPath); err == nil && info.Mode().IsRegular() {
+	// A saved remux is a permanent alias for an old playback URL, no longer a disposable cache.
+	validSource := !s.isInsideMediaCache(cachedPath) || s.cacheSources[cacheKey].matches()
+	if info, err := os.Stat(cachedPath); validSource && err == nil && info.Mode().IsRegular() {
 		return cachedPath, true
 	}
+	if s.isInsideMediaCache(cachedPath) {
+		_ = os.Remove(cachedPath)
+	}
 	delete(s.cacheFiles, cacheKey)
+	delete(s.cacheSources, cacheKey)
+	delete(s.remuxPrompted, cacheKey)
 	return "", false
 }
 
-func (s *MediaService) storeMediaCache(cacheKey string, cachedPath string) {
+func (s *MediaService) storeMediaCache(cacheKey string, cachedPath string, source mediaSourceFingerprint) error {
 	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if !source.matches() {
+		if s.isInsideMediaCache(cachedPath) {
+			_ = os.Remove(cachedPath)
+		}
+		return errors.New("媒體來源在準備期間已變更，請重新開啟")
+	}
 	s.cacheFiles[cacheKey] = cachedPath
-	s.cacheMu.Unlock()
+	s.cacheSources[cacheKey] = source
+	return nil
 }
 
 func (s *MediaService) ensureMediaCacheDir() (string, error) {
@@ -414,13 +639,13 @@ func (s *MediaService) ensureMediaCacheDir() (string, error) {
 	return s.cacheDir, nil
 }
 
-func (s *MediaService) extractMediaEntry(operationCtx context.Context, entry ImageEntry, cacheDirectory string) (string, error) {
+func (s *MediaService) extractMediaEntry(operationCtx context.Context, entry ImageEntry, cacheDirectory string, cacheKey string) (string, error) {
 	reader, err := openEntryReader(operationCtx, entry)
 	if err != nil {
 		return "", fmt.Errorf("讀取壓縮檔媒體失敗: %w", err)
 	}
 	defer reader.Close()
-	temporary, err := os.CreateTemp(cacheDirectory, entry.ID+"-*.part")
+	temporary, err := os.CreateTemp(cacheDirectory, cacheKey+"-*.part")
 	if err != nil {
 		return "", fmt.Errorf("建立媒體暫存檔失敗: %w", err)
 	}
@@ -439,10 +664,13 @@ func (s *MediaService) extractMediaEntry(operationCtx context.Context, entry Ima
 	if written > maxExportBytes {
 		return "", fmt.Errorf("%s 超過播放上限 %d GB", entry.Name, maxExportBytes/1024/1024/1024)
 	}
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
+	}
 	if err := temporary.Close(); err != nil {
 		return "", fmt.Errorf("寫入媒體暫存檔失敗: %w", err)
 	}
-	finalPath := filepath.Join(cacheDirectory, entry.ID+entry.Format)
+	finalPath := filepath.Join(cacheDirectory, cacheKey+entry.Format)
 	if err := os.Rename(temporaryPath, finalPath); err != nil {
 		return "", fmt.Errorf("完成媒體暫存檔失敗: %w", err)
 	}
@@ -451,17 +679,29 @@ func (s *MediaService) extractMediaEntry(operationCtx context.Context, entry Ima
 }
 
 func (s *MediaService) compatibleAudioPath(operationCtx context.Context, entry ImageEntry) (string, error) {
-	cacheKey := entry.ID + "-compatible-audio"
-	if cachedPath, ok := s.lookupMediaCache(cacheKey); ok {
-		return cachedPath, nil
+	operationCtx, finish := s.beginMediaWork(operationCtx)
+	defer finish()
+	lock, err := s.acquireMediaPrepareLock(operationCtx, entry.ID)
+	if err != nil {
+		return "", err
 	}
+	defer s.releaseMediaPrepareLock(entry.ID, lock)
+	return s.compatibleAudioPathLocked(operationCtx, entry)
+}
 
-	lock := s.acquireMediaPrepareLock(cacheKey)
-	defer s.releaseMediaPrepareLock(cacheKey, lock)
+func (s *MediaService) compatibleAudioPathLocked(operationCtx context.Context, entry ImageEntry) (string, error) {
+	cacheKey := entry.ID + "-compatible-audio"
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
+	}
 	if cachedPath, ok := s.lookupMediaCache(cacheKey); ok {
 		return cachedPath, nil
 	}
 	if err := checkOperation(operationCtx); err != nil {
+		return "", err
+	}
+	source, err := fingerprintMediaSource(entry)
+	if err != nil {
 		return "", err
 	}
 	cacheDirectory, err := s.ensureMediaCacheDir()
@@ -472,7 +712,7 @@ func (s *MediaService) compatibleAudioPath(operationCtx context.Context, entry I
 	sourcePath := entry.Path
 	removeSource := false
 	if entry.Source == "archive" {
-		extractedPath, err := s.extractMediaEntry(operationCtx, entry, cacheDirectory)
+		extractedPath, err := s.extractMediaEntry(operationCtx, entry, cacheDirectory, cacheKey+"-source")
 		if err != nil {
 			return "", err
 		}
@@ -486,7 +726,9 @@ func (s *MediaService) compatibleAudioPath(operationCtx context.Context, entry I
 	if err != nil {
 		return "", err
 	}
-	s.storeMediaCache(cacheKey, playablePath)
+	if err := s.storeMediaCache(cacheKey, playablePath, source); err != nil {
+		return "", err
+	}
 	return playablePath, nil
 }
 
@@ -505,7 +747,7 @@ func (s *MediaService) convertAudioToM4A(operationCtx context.Context, sourcePat
 		"-map", "0:a:0?", "-map_metadata", "0", "-vn",
 		"-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", "-f", "mp4", temporaryPath,
 	)
-	if output, commandErr := command.CombinedOutput(); commandErr != nil {
+	if output, commandErr := runMediaCommand(command); commandErr != nil {
 		if cancelErr := checkOperation(operationCtx); cancelErr != nil {
 			return "", cancelErr
 		}
@@ -517,6 +759,9 @@ func (s *MediaService) convertAudioToM4A(operationCtx context.Context, sourcePat
 			message = commandErr.Error()
 		}
 		return "", fmt.Errorf("音訊相容轉換失敗: %s", message)
+	}
+	if err := checkOperation(operationCtx); err != nil {
+		return "", err
 	}
 	if err := os.Rename(temporaryPath, finalPath); err != nil {
 		return "", fmt.Errorf("完成音訊相容暫存檔失敗: %w", err)
@@ -576,9 +821,14 @@ func (s *MediaService) remuxToPlayableContainer(operationCtx context.Context, so
 		_ = os.Remove(temporaryPath)
 
 		command := exec.CommandContext(operationCtx, ffmpegPath, remuxArguments(sourcePath, temporaryPath, attempt)...)
-		output, commandErr := command.CombinedOutput()
+		output, commandErr := runMediaCommand(command)
 		if commandErr == nil {
+			if err := checkOperation(operationCtx); err != nil {
+				_ = os.Remove(temporaryPath)
+				return "", err
+			}
 			if err := os.Rename(temporaryPath, finalPath); err != nil {
+				_ = os.Remove(temporaryPath)
 				return "", fmt.Errorf("完成影片播放快取失敗: %w", err)
 			}
 			return finalPath, nil
@@ -677,11 +927,39 @@ func probeMediaCodecs(operationCtx context.Context, sourcePath string) (mediaCod
 		"-v", "error", "-print_format", "json",
 		"-show_entries", "stream=codec_type,codec_name", sourcePath,
 	)
-	output, err := command.Output()
-	if err != nil {
+	output := mediaOutputBuffer{limit: maxMediaProbeBytes}
+	command.Stdout = &output
+	command.Stderr = io.Discard
+	if err := command.Run(); err != nil {
 		return mediaCodecs{}, fmt.Errorf("讀取影片編碼資訊失敗: %w", err)
 	}
-	return parseProbedCodecs(output)
+	if output.truncated {
+		return mediaCodecs{}, errors.New("影片編碼資訊超過大小上限")
+	}
+	return parseProbedCodecs(output.data)
+}
+
+// mediaOutputBuffer 持續排空子程序輸出，只保留有限前綴，避免損壞媒體的重複錯誤耗盡記憶體。
+type mediaOutputBuffer struct {
+	data      []byte
+	limit     int
+	truncated bool
+}
+
+func (output *mediaOutputBuffer) Write(payload []byte) (int, error) {
+	retained := min(len(payload), output.limit-len(output.data))
+	output.data = append(output.data, payload[:retained]...)
+	output.truncated = output.truncated || retained < len(payload)
+	return len(payload), nil
+}
+
+func runMediaCommand(command *exec.Cmd) ([]byte, error) {
+	output := mediaOutputBuffer{limit: maxMediaDiagnosticBytes}
+	// os/exec 對相同 writer 的 stdout／stderr 使用同一個複製 goroutine。
+	command.Stdout = &output
+	command.Stderr = &output
+	err := command.Run()
+	return output.data, err
 }
 
 func parseProbedCodecs(payload []byte) (mediaCodecs, error) {
@@ -767,10 +1045,23 @@ func bundledFFmpegTool(name string) (string, error) {
 }
 
 func (s *MediaService) cleanup() {
+	s.cleanupMu.Lock()
+	defer s.cleanupMu.Unlock()
+	s.cacheMu.Lock()
+	if s.cancelCache != nil {
+		s.cancelCache()
+	}
+	s.cacheMu.Unlock()
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	s.cacheMu.Lock()
 	cacheDirectory := s.cacheDir
 	s.cacheDir = ""
 	s.cacheFiles = make(map[string]string)
+	s.cacheSources = make(map[string]mediaSourceFingerprint)
+	s.remuxPrompted = make(map[string]bool)
+	s.cacheContext = nil
+	s.cancelCache = nil
 	s.cacheMu.Unlock()
 	if cacheDirectory != "" {
 		_ = os.RemoveAll(cacheDirectory)

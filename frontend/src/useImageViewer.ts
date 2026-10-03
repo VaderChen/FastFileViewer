@@ -21,6 +21,9 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const stageRef = useRef<HTMLElement | null>(null);
+  const centerFrameRef = useRef<number | null>(null);
+  const viewRef = useRef({ imageId, fullscreen, panEnabled });
+  viewRef.current = { imageId, fullscreen, panEnabled };
   const dragPanRef = useRef({
     active: false,
     pointerId: 0,
@@ -28,7 +31,30 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
     startY: 0,
     scrollLeft: 0,
     scrollTop: 0,
+    stage: null as HTMLElement | null,
   });
+
+  const cancelCenterFrame = () => {
+    if (centerFrameRef.current === null) return;
+    window.cancelAnimationFrame(centerFrameRef.current);
+    centerFrameRef.current = null;
+  };
+
+  const stopPanning = () => {
+    const drag = dragPanRef.current;
+    drag.active = false;
+    if (drag.stage?.hasPointerCapture(drag.pointerId)) drag.stage.releasePointerCapture(drag.pointerId);
+    drag.stage = null;
+  };
+
+  useEffect(() => {
+    // 切換圖片、媒體或全螢幕時，舊舞台可能不再收到 pointerup。
+    setPanning(false);
+    return () => {
+      stopPanning();
+      cancelCenterFrame();
+    };
+  }, [fullscreen, imageId, panEnabled]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -52,22 +78,13 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
   }, [fullscreen, imageId]);
 
   const centerImage = () => {
-    window.requestAnimationFrame(() => {
-      const stage = stageRef.current;
-      if (!stage) {
-        return;
-      }
-      stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
-      stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
-    });
-  };
-
-  useEffect(() => {
-    window.requestAnimationFrame(() => {
-      const stage = stageRef.current;
-      if (!stage) {
-        return;
-      }
+    cancelCenterFrame();
+    const stage = stageRef.current;
+    if (!stage) return;
+    centerFrameRef.current = window.requestAnimationFrame(() => {
+      centerFrameRef.current = null;
+      const view = viewRef.current;
+      if (stageRef.current !== stage || view.imageId !== imageId || view.fullscreen !== fullscreen || view.panEnabled !== panEnabled) return;
       if (!panEnabled) {
         // 文件、PDF 與媒體不使用圖片置中視角，開啟時固定從左上角開始。
         stage.scrollLeft = 0;
@@ -77,6 +94,11 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
       stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
       stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
     });
+  };
+
+  useEffect(() => {
+    centerImage();
+    return cancelCenterFrame;
   }, [fullscreen, imageId, naturalSize.height, naturalSize.width, panEnabled, rotation, viewerMode, zoom, zoomBehavior]);
 
   // resetView 會在切換圖片時把視角回到預設；lockRatio 刻意保留使用者原本的縮放。
@@ -107,7 +129,7 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
   };
 
   const handlePanStart = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!panEnabled || event.button !== 0) {
+    if (!panEnabled || event.button !== 0 || dragPanRef.current.active) {
       return;
     }
 
@@ -124,6 +146,7 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
       startY: event.clientY,
       scrollLeft: stage.scrollLeft,
       scrollTop: stage.scrollTop,
+      stage,
     };
     stage.setPointerCapture(event.pointerId);
     setPanning(true);
@@ -132,7 +155,7 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
 
   const handlePanMove = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = dragPanRef.current;
-    if (!drag.active || drag.pointerId !== event.pointerId) {
+    if (!panEnabled || !drag.active || drag.pointerId !== event.pointerId || drag.stage !== event.currentTarget) {
       return;
     }
 
@@ -148,10 +171,7 @@ export function useImageViewer({ zoomBehavior, fullscreen, imageId, panEnabled }
       return;
     }
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    dragPanRef.current.active = false;
+    stopPanning();
     setPanning(false);
   };
 

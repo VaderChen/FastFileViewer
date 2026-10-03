@@ -47,13 +47,16 @@ import { isMediaKind, isPlaybackMediaKind } from './types';
 import type { AppInfo, BootstrapPayload, DocumentPayload, DocumentTheme, DownloadStatus, ImageEntry, ImagePayload, LanguagePreference, LibraryNode, LocaleCode, SettingsTab, StageBackground, ZoomBehavior } from './types';
 import { blockMarkdownUrl, limitDocumentPreview, maxRenderedCodeLines, normalizeDocumentLineEndings } from './markdownSecurity';
 import { DelimitedTableView, JsonStructuredView } from './structuredViewers';
-import { removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
+import { isLibraryTree, moveLibraryEntry, mergeScannedNodes, removeLibraryEntries, replaceLibraryEntry } from './libraryTree';
 import { downloadCandidateDisplayURL, downloadHost, extractDownloadURLs, formatDownloadSize } from './downloads';
 import { useDownloads } from './useDownloads';
 import { useImageViewer } from './useImageViewer';
 import { extractErrorMessage, isOperationCancelled } from './operations';
 import { useWorkspace } from './useWorkspace';
 import { ThumbnailCard } from './ThumbnailCard';
+import { clearThumbnailCache } from './thumbnailCache';
+import { VirtualThumbnailGrid } from './VirtualThumbnailGrid';
+import { decodeImageURL, imageURLToDataURI } from './imageTransport';
 import { formatBytes } from './format';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
 import { MediaPlayer } from './MediaPlayer';
@@ -725,6 +728,7 @@ interface PersistedLibraryCache {
 }
 
 interface PersistedLibrarySelection {
+  expandedNodeIds?: string[];
   rootPath: string;
   selectedNodeId: string;
   selectedImageId: string;
@@ -758,6 +762,8 @@ export default function App() {
   const [rootPath, setRootPath] = useState('');
   const [pendingOpenFilePath, setPendingOpenFilePath] = useState('');
   const pendingOpenFilePathRef = useRef('');
+  const openFileGenerationRef = useRef(0);
+  const [thumbnailRevision, setThumbnailRevision] = useState(0);
   const [tree, setTree] = useState<LibraryNode | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
@@ -797,13 +803,17 @@ export default function App() {
   const [appInfo, setAppInfo] = useState<AppInfo>(fallbackAppInfo);
   const scanTokenRef = useRef(0);
   const scanOperationRef = useRef<number | null>(null);
-  const checksumOperationRef = useRef<number | null>(null);
+  const checksumRequestRef = useRef<{ operationId: number; cancelled: boolean } | null>(null);
+  const libraryResetRef = useRef<Promise<void>>(Promise.resolve());
   const imageLoadOperationRef = useRef<number | null>(null);
   const imagePrefetchOperationRef = useRef<number | null>(null);
   const cacheSaveTimerRef = useRef<number | null>(null);
-  const directOpenInFlightRef = useRef('');
+  const libraryViewRef = useRef({ selectedNodeId, selectedImageId, expandedNodeIds });
+  libraryViewRef.current = { selectedNodeId, selectedImageId, expandedNodeIds };
+  const directOpenInFlightRef = useRef<{ path: string; generation: number } | null>(null);
 
   const updatePendingOpenFilePath = (filePath: string) => {
+    openFileGenerationRef.current += 1;
     pendingOpenFilePathRef.current = filePath;
     setPendingOpenFilePath(filePath);
   };
@@ -946,17 +956,31 @@ export default function App() {
   }, [bootstrap.supportedImages, bootstrapReady]);
 
   useEffect(() => {
+    let disposed = false;
+    let consumeOpenFilesTail = Promise.resolve();
+    const initialScanToken = scanTokenRef.current;
+    const initialOpenGeneration = openFileGenerationRef.current;
+    const canRestoreLibrary = () => !disposed
+      && scanTokenRef.current === initialScanToken
+      && openFileGenerationRef.current === initialOpenGeneration;
+    const consumeOpenFiles = () => {
+      const requestedScanToken = scanTokenRef.current;
+      // Consume 會清空後端佇列；串行呼叫才能保留較早已取走、但較晚回傳的檔案。
+      const request = consumeOpenFilesTail.then(async () => {
+        if (disposed) return;
+        const paths = await window.go?.app?.App?.ConsumeOpenFilePaths?.();
+        const latestPath = paths?.[paths.length - 1]?.trim();
+        if (!disposed && scanTokenRef.current === requestedScanToken && latestPath) {
+          updatePendingOpenFilePath(latestPath);
+        }
+      });
+      consumeOpenFilesTail = request.catch(() => undefined);
+      return request;
+    };
     let unsubscribeOpenFile: (() => void) | undefined;
     try {
       unsubscribeOpenFile = EventsOn('fastfileviewer:file-open', () => {
-        void Promise.resolve(window.go?.app?.App?.ConsumeOpenFilePaths?.())
-          .then((paths) => {
-            const latestPath = paths?.[paths.length - 1]?.trim();
-            if (latestPath) {
-              updatePendingOpenFilePath(latestPath);
-            }
-          })
-          .catch(() => undefined);
+        void consumeOpenFiles().catch(() => undefined);
       });
     } catch {
       // 瀏覽器開發模式沒有 Wails runtime，忽略事件註冊即可。
@@ -965,18 +989,14 @@ export default function App() {
     // 系統指定檔案之前執行。
     void (async () => {
       try {
-        const paths = await window.go?.app?.App?.ConsumeOpenFilePaths?.();
-        const latestPath = paths?.[paths.length - 1]?.trim();
-        if (latestPath) {
-          updatePendingOpenFilePath(latestPath);
-        }
+        await consumeOpenFiles();
       } catch {
         // 瀏覽器開發模式沒有 Wails runtime，忽略即可。
       }
-      return window.go?.app?.App?.Bootstrap?.();
+      return disposed ? undefined : window.go?.app?.App?.Bootstrap?.();
     })()
       .then(async (payload) => {
-        if (!payload) {
+        if (disposed || !payload) {
           return;
         }
         const supportedMedia = payload.supportedMedia?.length ? payload.supportedMedia : fallbackBootstrap.supportedMedia;
@@ -990,13 +1010,14 @@ export default function App() {
         setMediaFormatsReady(true);
         // 系統傳入檔案時優先處理該檔案，不要先還原上次目錄／快取，
         // 否則大型目錄快取會阻塞開檔畫面數秒。
+        if (!canRestoreLibrary()) return;
         const pendingPath = pendingOpenFilePathRef.current.trim();
         const persistedRootPath = pendingPath ? '' : readPersistedRootPath();
         const initialRootPath = pendingPath ? directoryPathForFile(pendingPath) : (persistedRootPath || payload.defaultPath);
         setRootPath(initialRootPath);
         if (persistedRootPath && !pendingPath) {
           const cache = await readLibraryCache(persistedRootPath);
-          if (cache) {
+          if (cache && canRestoreLibrary()) {
             applyLibraryCache(cache);
           }
         }
@@ -1005,13 +1026,20 @@ export default function App() {
 
     void window.go?.app?.App?.GetAppInfo?.()
       .then((payload) => {
-        if (payload) {
+        if (!disposed && payload) {
           setAppInfo(payload);
         }
       })
       .catch(() => undefined);
 
-    return () => unsubscribeOpenFile?.();
+    return () => {
+      disposed = true;
+      scanTokenRef.current += 1;
+      openFileGenerationRef.current += 1;
+      cancelBackendOperation(scanOperationRef.current);
+      scanOperationRef.current = null;
+      unsubscribeOpenFile?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -1103,16 +1131,15 @@ export default function App() {
       setSelectionAnchorId((current) => removed.has(current) ? '' : current);
     },
     onEntryMoved: (oldId, replacement) => {
-      setTree((current) => current ? replaceLibraryEntry(current, oldId, replacement) : current);
-      if (selectedImageId === oldId) setSelectedImageId(replacement.id);
+      setTree((current) => current ? moveLibraryEntry(current, oldId, replacement) : current);
+      if (selectedImageId === oldId) setSelectedImageId('');
       setSelectedImageIds((current) => {
         if (!current.has(oldId)) return current;
         const next = new Set(current);
         next.delete(oldId);
-        next.add(replacement.id);
         return next;
       });
-      setSelectionAnchorId((current) => current === oldId ? replacement.id : current);
+      setSelectionAnchorId((current) => current === oldId ? '' : current);
     },
   });
 
@@ -1178,19 +1205,24 @@ export default function App() {
     setDocumentViewMode(selectedImageEntry && supportsDocumentPreview(selectedImageEntry.format) ? 'preview' : 'raw');
     setActiveChecksum('');
     setChecksumBusy(false);
-    if (checksumOperationRef.current !== null) {
-      void window.go?.app?.App?.CancelOperation?.(checksumOperationRef.current);
-      checksumOperationRef.current = null;
-    }
-  }, [selectedImageEntry?.format, selectedImageEntry?.id]);
+    return () => {
+      const request = checksumRequestRef.current;
+      if (request) {
+        request.cancelled = true;
+        cancelBackendOperation(request.operationId);
+        checksumRequestRef.current = null;
+      }
+    };
+  }, [selectedImageEntry]);
 
   useEffect(() => {
     if (imageLoadOperationRef.current !== null) {
-      void window.go?.app?.App?.CancelOperation?.(imageLoadOperationRef.current);
+      cancelBackendOperation(imageLoadOperationRef.current);
       imageLoadOperationRef.current = null;
     }
     let cancelled = false;
     if (!selectedImageId) {
+      setLoadingImage(false);
       return () => {
         cancelled = true;
       };
@@ -1216,10 +1248,14 @@ export default function App() {
       setDocumentPayload(null);
       setPdfURL(null);
       if (selectedImageEntry.kind === 'pdf') {
+        let operationId = 0;
         void (async () => {
-          let operationId = 0;
           try {
             operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+            if (cancelled) {
+              cancelBackendOperation(operationId);
+              return;
+            }
             const prepare = window.go?.app?.MediaService?.PrepareDocumentByPath ?? window.go?.app?.App?.PrepareDocumentByPath;
             const url = await prepare?.(selectedImageEntry.path, operationId);
             if (!cancelled && url) {
@@ -1231,7 +1267,7 @@ export default function App() {
             }
           } finally {
             if (operationId !== 0) {
-              void window.go?.app?.App?.FinishOperation?.(operationId);
+              finishBackendOperation(operationId);
             }
             if (!cancelled) {
               setLoadingImage(false);
@@ -1240,6 +1276,7 @@ export default function App() {
         })();
         return () => {
           cancelled = true;
+          cancelBackendOperation(operationId);
         };
       }
       void window.go?.app?.App?.LoadDocumentByPath?.(selectedImageEntry.path)
@@ -1268,45 +1305,30 @@ export default function App() {
     setPdfURL(null);
 
     const cachedPayload = selectedImageEntry ? getCachedImagePayload(selectedImageEntry) : null;
-    if (cachedPayload) {
-      setImagePayload(cachedPayload);
-      setLoadingImage(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
+    const imageController = new AbortController();
+    // 立即釋放上一張圖片的 DOM 參考，避免新舊大圖長時間同時保留。
+    setImagePayload(null);
     void (async () => {
       let operationId = 0;
       try {
-        if (selectedImageEntry) {
+        let payload = cachedPayload;
+        if (!payload && selectedImageEntry) {
           const pendingPrefetch = imagePayloadPrefetches.get(imagePayloadCacheKey(selectedImageEntry));
-          if (pendingPrefetch) {
-            const prefetchedPayload = await pendingPrefetch;
-            if (prefetchedPayload && !cancelled) {
-              setImagePayload(prefetchedPayload);
-              return;
-            }
-            if (cancelled) {
-              return;
-            }
-          }
+          if (pendingPrefetch) payload = await pendingPrefetch;
+          if (cancelled) return;
         }
-        operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-        if (cancelled) {
-          if (operationId !== 0) {
-            await window.go?.app?.App?.CancelOperation?.(operationId);
-          }
-          return;
+        if (!payload) {
+          operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+          if (cancelled) return;
+          imageLoadOperationRef.current = operationId || null;
+          payload = (selectedImageEntry
+            ? await loadImagePayloadByPath(selectedImageEntry.path, operationId)
+            : await window.go?.app?.App?.LoadImage?.(selectedImageId)) ?? null;
         }
-        imageLoadOperationRef.current = operationId || null;
-        const payload = selectedImageEntry
-          ? await loadImagePayloadByPath(selectedImageEntry.path, operationId)
-          : await window.go?.app?.App?.LoadImage?.(selectedImageId);
         if (!payload || cancelled) {
           return;
         }
-        await decodeImagePayload(payload);
+        await decodeImageURL(payload.dataUri, imageController.signal);
         if (cancelled) {
           return;
         }
@@ -1321,7 +1343,7 @@ export default function App() {
         }
       } finally {
         if (operationId !== 0) {
-          void window.go?.app?.App?.FinishOperation?.(operationId);
+          finishBackendOperation(operationId);
         }
         if (imageLoadOperationRef.current === operationId) {
           imageLoadOperationRef.current = null;
@@ -1334,8 +1356,9 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      imageController.abort();
       if (imageLoadOperationRef.current !== null) {
-        void window.go?.app?.App?.CancelOperation?.(imageLoadOperationRef.current);
+        cancelBackendOperation(imageLoadOperationRef.current);
       }
     };
   }, [selectedImageEntry, selectedImageId, t.operationFailed, zoomBehavior]);
@@ -1374,34 +1397,36 @@ export default function App() {
         if (getCachedImagePayload(candidate)) {
           continue;
         }
-        const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-        if (cancelled) {
-          if (operationId !== 0) {
-            await window.go?.app?.App?.CancelOperation?.(operationId);
-            await window.go?.app?.App?.FinishOperation?.(operationId);
+        let operationId = 0;
+        try {
+          operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+          if (cancelled) {
+            cancelBackendOperation(operationId);
+            return;
           }
+          imagePrefetchOperationRef.current = operationId || null;
+          await prefetchImagePayload(candidate, operationId);
+        } catch {
+          // 預取失敗不影響目前圖片；bridge 關閉時停止分配後續工作。
           return;
-        }
-        imagePrefetchOperationRef.current = operationId || null;
-        await prefetchImagePayload(candidate, operationId);
-        if (operationId !== 0) {
-          void window.go?.app?.App?.FinishOperation?.(operationId);
-        }
-        if (imagePrefetchOperationRef.current === operationId) {
-          imagePrefetchOperationRef.current = null;
+        } finally {
+          finishBackendOperation(operationId);
+          if (imagePrefetchOperationRef.current === operationId) {
+            imagePrefetchOperationRef.current = null;
+          }
         }
       }
     })();
     return () => {
       cancelled = true;
       if (imagePrefetchOperationRef.current !== null) {
-        void window.go?.app?.App?.CancelOperation?.(imagePrefetchOperationRef.current);
+        cancelBackendOperation(imagePrefetchOperationRef.current);
       }
     };
   }, [imagePayload?.id, navigationImages, selectedImageEntry]);
 
   useEffect(() => {
-    if (!tree || !rootPath.trim() || scanning) {
+    if (!tree || !rootPath.trim() || scanning || normalizeFilePath(tree.path) !== normalizeFilePath(rootPath.trim())) {
       return;
     }
 
@@ -1412,9 +1437,9 @@ export default function App() {
       void writeLibraryCache({
         rootPath: rootPath.trim(),
         tree,
-        selectedNodeId,
-        selectedImageId,
-        expandedNodeIds: Array.from(expandedNodeIds),
+        selectedNodeId: libraryViewRef.current.selectedNodeId,
+        selectedImageId: libraryViewRef.current.selectedImageId,
+        expandedNodeIds: Array.from(libraryViewRef.current.expandedNodeIds),
         scannedDirectories,
         savedAt: Date.now(),
       });
@@ -1427,18 +1452,19 @@ export default function App() {
         cacheSaveTimerRef.current = null;
       }
     };
-  }, [expandedNodeIds, rootPath, scannedDirectories, scanning, tree]);
+  }, [rootPath, scannedDirectories, scanning, tree]);
 
   useEffect(() => {
-    if (!tree || !rootPath.trim()) {
+    if (!tree || !rootPath.trim() || normalizeFilePath(tree.path) !== normalizeFilePath(rootPath.trim())) {
       return;
     }
     writeLibrarySelection({
       rootPath: rootPath.trim(),
       selectedNodeId,
       selectedImageId,
+      expandedNodeIds: Array.from(expandedNodeIds),
     });
-  }, [rootPath, selectedImageId, selectedNodeId, tree]);
+  }, [rootPath, selectedImageId, selectedNodeId, expandedNodeIds, tree]);
 
   const applyLibraryCache = (cache: PersistedLibraryCache) => {
     const selection = readLibrarySelection(cache.rootPath);
@@ -1450,7 +1476,8 @@ export default function App() {
     setSelectedImageId(restoredImageId);
     setSelectedImageIds(restoredImageId ? new Set([restoredImageId]) : new Set());
     setSelectionAnchorId(restoredImageId);
-    setExpandedNodeIds(new Set(cache.expandedNodeIds.length > 0 ? cache.expandedNodeIds : [cache.tree.id]));
+    const expanded = Array.isArray(selection?.expandedNodeIds) ? selection.expandedNodeIds.filter((id) => typeof id === 'string') : cache.expandedNodeIds;
+    setExpandedNodeIds(new Set(expanded));
     setScannedDirectories(cache.scannedDirectories);
   };
 
@@ -1484,7 +1511,7 @@ export default function App() {
   const handleStopScan = () => {
     scanTokenRef.current += 1;
     if (scanOperationRef.current !== null) {
-      void window.go?.app?.App?.CancelOperation?.(scanOperationRef.current);
+      cancelBackendOperation(scanOperationRef.current);
     }
     setScanning(false);
     setCurrentScanPath('');
@@ -1499,8 +1526,13 @@ export default function App() {
     }
 
     const token = scanTokenRef.current + 1;
+    // 使用者重新選擇圖庫後，先前 Finder 意圖不能在舊回應結束後重啟。
+    if (pendingOpenFilePathRef.current) updatePendingOpenFilePath('');
     clearImagePayloadCache();
+    setThumbnailRevision(clearThumbnailCache());
     scanTokenRef.current = token;
+    cancelBackendOperation(scanOperationRef.current);
+    scanOperationRef.current = null;
     setScanning(true);
     setErrorMessage('');
     setImagePayload(null);
@@ -1510,6 +1542,7 @@ export default function App() {
     setRootPath(trimmedPath);
 
     const cache = await readLibraryCache(trimmedPath);
+    if (scanTokenRef.current !== token) return;
     if (cache && !preserveCurrentSelection) {
       applyLibraryCache(cache);
     } else if (!preserveCurrentSelection) {
@@ -1522,8 +1555,18 @@ export default function App() {
     let operationId = 0;
     try {
       operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-      scanOperationRef.current = operationId;
-      await window.go?.app?.App?.ResetLibrary?.();
+      if (scanTokenRef.current !== token) {
+        cancelBackendOperation(operationId);
+        return;
+      }
+      scanOperationRef.current = operationId || null;
+      // 新掃描須等前次 Reset 完成，避免舊重設清掉新工作登錄的項目。
+      const reset = libraryResetRef.current.then(async () => {
+        if (scanTokenRef.current === token) await window.go?.app?.App?.ResetLibrary?.();
+      });
+      libraryResetRef.current = reset.catch(() => undefined);
+      await reset;
+      if (scanTokenRef.current !== token) return;
       const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, enabledDocumentExtensions, enabledMediaExtensions, operationId);
       if (!firstResult?.node || scanTokenRef.current !== token) {
         return;
@@ -1532,7 +1575,7 @@ export default function App() {
       const rootNode = firstResult.node;
       // 根目錄變更時必須完整替換舊樹；只有同一根目錄的後續分批掃描才合併。
       const sameRoot = tree?.id === rootNode.id;
-      setTree((current) => (current?.id === rootNode.id ? mergeScannedNode(current, rootNode) : rootNode));
+      setTree((current) => (current?.id === rootNode.id ? mergeScannedNodes(current, [rootNode]) : rootNode));
       setSelectedNodeId(rootNode.id);
       setExpandedNodeIds((current) => new Set(sameRoot && current.size > 0 ? current : [rootNode.id]));
       setRootPath(firstResult.rootPath);
@@ -1546,14 +1589,27 @@ export default function App() {
       prioritizeScanQueue(queue, scanTargetPath);
       setPendingDirectories(queue.length);
 
+      let pendingNodes: LibraryNode[] = [];
+      let lastPublish = performance.now();
+      const publishScan = () => {
+        if (!pendingNodes.length || scanTokenRef.current !== token) return;
+        const batch = pendingNodes;
+        pendingNodes = [];
+        setTree((current) => current ? mergeScannedNodes(current, batch) : current);
+        setScannedDirectories((current) => current + batch.length);
+        setPendingDirectories(queue.length);
+        lastPublish = performance.now();
+      };
       while (queue.length > 0) {
         if (scanTokenRef.current !== token) {
           return;
         }
 
         const nextPath = queue.shift() ?? '';
-        setCurrentScanPath(nextPath);
-        setPendingDirectories(queue.length + 1);
+        if (performance.now() - lastPublish >= 100) {
+          publishScan();
+          setCurrentScanPath(nextPath);
+        }
 
         try {
           const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, enabledDocumentExtensions, enabledMediaExtensions, operationId);
@@ -1561,31 +1617,33 @@ export default function App() {
             return;
           }
           const scannedNode = result.node;
-          setTree((current) => (current ? mergeScannedNode(current, scannedNode) : current));
-          setScannedDirectories((current) => current + 1);
+          pendingNodes.push(scannedNode);
           if (result.warnings?.length) {
             setErrorMessage(result.warnings.join('\n'));
           }
           const childDirectories = scannedNode.children.filter((child) => child.kind === 'directory').map((child) => child.path);
           queue.push(...childDirectories);
           prioritizeScanQueue(queue, scanTargetPath);
-          setPendingDirectories(queue.length);
-          await yieldToUI();
-        } catch (error) {
-          if (!isOperationCancelled(error)) {
-            setErrorMessage(extractErrorMessage(error, t.operationFailed));
+          if (performance.now() - lastPublish >= 100) {
+            publishScan();
+            await yieldToUI();
           }
+        } catch (error) {
+          if (scanTokenRef.current !== token) return;
+          if (isOperationCancelled(error)) break;
+          setErrorMessage(extractErrorMessage(error, t.operationFailed));
         }
       }
+      publishScan();
     } catch (error) {
-      if (!isOperationCancelled(error)) {
+      if (scanTokenRef.current === token && !isOperationCancelled(error)) {
         setTree(null);
         setSelectedNodeId('');
         setErrorMessage(extractErrorMessage(error, t.operationFailed));
       }
     } finally {
       if (operationId !== 0) {
-        void window.go?.app?.App?.FinishOperation?.(operationId);
+        finishBackendOperation(operationId);
       }
       if (scanOperationRef.current === operationId) {
         scanOperationRef.current = null;
@@ -1607,16 +1665,28 @@ export default function App() {
       return;
     }
     const directoryPath = directoryPathForFile(requestedPath);
-    const sameDirectory = normalizeFilePath(rootPath) === normalizeFilePath(directoryPath);
-    if (!sameDirectory || !tree) {
-      if (!scanning && directOpenInFlightRef.current !== requestedPath) {
-        directOpenInFlightRef.current = requestedPath;
+    const sameDirectory = normalizeFilePath(rootPath) === normalizeFilePath(directoryPath)
+      && tree !== null && normalizeFilePath(tree.path) === normalizeFilePath(directoryPath);
+    const target = sameDirectory
+      ? navigationImages.find((item) => normalizeFilePath(item.image.path) === normalizeFilePath(requestedPath))
+      : undefined;
+    if (!sameDirectory || !tree || (!target && !scanning)) {
+      if (!scanning && (directOpenInFlightRef.current?.path !== requestedPath
+        || directOpenInFlightRef.current.generation !== openFileGenerationRef.current)) {
+        const request = { path: requestedPath, generation: openFileGenerationRef.current };
+        directOpenInFlightRef.current = request;
+        const openGeneration = openFileGenerationRef.current;
+        const scanToken = scanTokenRef.current;
+        const isCurrentRequest = () => openFileGenerationRef.current === openGeneration
+          && scanTokenRef.current === scanToken;
         setLibrarySourceTab('current');
         setRootPath(directoryPath);
         void (async () => {
           try {
             const directEntry = await window.go?.app?.App?.OpenFileByPath?.(requestedPath);
+            if (!isCurrentRequest()) return;
             if (!directEntry) {
+              updatePendingOpenFilePath('');
               void handleScan(directoryPath);
               return;
             }
@@ -1628,23 +1698,26 @@ export default function App() {
             setSelectedImageIds(new Set([directEntry.id]));
             setSelectionAnchorId(directEntry.id);
             updatePendingOpenFilePath('');
+            const completedGeneration = openFileGenerationRef.current;
             // 先讓 WebView 完成目標文件的第一幀，再啟動完整目錄掃描。
             window.setTimeout(() => {
-              void handleScan(directoryPath, true);
+              if (scanTokenRef.current === scanToken && openFileGenerationRef.current === completedGeneration) {
+                void handleScan(directoryPath, true);
+              }
             }, 0);
           } catch {
+            if (!isCurrentRequest()) return;
             updatePendingOpenFilePath('');
             void handleScan(directoryPath);
           } finally {
-            if (directOpenInFlightRef.current === requestedPath) {
-              directOpenInFlightRef.current = '';
+            if (directOpenInFlightRef.current === request) {
+              directOpenInFlightRef.current = null;
             }
           }
         })();
       }
       return;
     }
-    const target = navigationImages.find((item) => normalizeFilePath(item.image.path) === normalizeFilePath(requestedPath));
     if (target) {
       setSelectedNodeId(target.node.id);
       setSelectedImageId(target.image.id);
@@ -2103,24 +2176,32 @@ export default function App() {
   };
 
   const handleCalculateChecksum = async () => {
-    if (!activeImage || checksumBusy) {
+    if (!activeImage || checksumRequestRef.current) {
       return;
     }
+    const request = { operationId: 0, cancelled: false };
+    checksumRequestRef.current = request;
     setChecksumBusy(true);
     try {
-      const operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
-      checksumOperationRef.current = operationId;
-      const checksum = await window.go?.app?.App?.CalculateChecksum?.(activeImage, operationId);
-      if (checksum) {
+      request.operationId = await window.go?.app?.App?.BeginOperation?.() ?? 0;
+      if (request.cancelled) {
+        cancelBackendOperation(request.operationId);
+        return;
+      }
+      const checksum = await window.go?.app?.App?.CalculateChecksum?.(activeImage, request.operationId);
+      if (!request.cancelled && checksum) {
         setActiveChecksum(checksum);
       }
     } catch (error) {
-      if (!isOperationCancelled(error)) {
+      if (!request.cancelled && !isOperationCancelled(error)) {
         setErrorMessage(extractErrorMessage(error, t.operationFailed));
       }
     } finally {
-      checksumOperationRef.current = null;
-      setChecksumBusy(false);
+      finishBackendOperation(request.operationId);
+      if (checksumRequestRef.current === request) {
+        checksumRequestRef.current = null;
+        setChecksumBusy(false);
+      }
     }
   };
 
@@ -2774,50 +2855,51 @@ export default function App() {
             </div>
             {workspaceMessage ? <div className="workspace-message">{workspaceMessage}</div> : null}
             <div className={`workspace-content ${duplicateGroups.length > 0 ? 'has-duplicates' : ''}`}>
-              <div className="thumbnail-grid">
-                {filteredWorkspaceImages.length > 0 ? (
-                  <>
-                    {displayedWorkspaceImages.map((image) => (
-                      <ThumbnailCard
-                        key={image.id}
-                        image={image}
-                        active={image.id === selectedImageId}
-                        selected={selectedWorkspaceImageIds.has(image.id)}
-                        archiveLabel={t.sourceArchive}
-                        folderLabel={t.sourceFolder}
-                        onToggle={(event) => toggleWorkspaceImage(image.id, { toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })}
-                        onOpen={() => {
-                          const imageRef = navigationImages.find((item) => item.image.id === image.id);
-                          if (imageRef) {
-                            setSelectedNodeId(imageRef.node.id);
-                          }
-                          setSelectedImageId(image.id);
-                        }}
-                      />
-                    ))}
-                    {displayedWorkspaceImages.length < filteredWorkspaceImages.length ? (
-                      <div className="thumbnail-grid-actions">
-                        <button
-                          className="thumbnail-grid-more"
-                          type="button"
-                          disabled={workspaceLoadingMore}
-                          onClick={loadMoreWorkspaceImages}
-                        >
-                          {t.loadMore} ({displayedWorkspaceImages.length.toLocaleString()} / {filteredWorkspaceImages.length.toLocaleString()})
-                        </button>
-                        <button
-                          className="thumbnail-grid-more secondary"
-                          type="button"
-                          disabled={workspaceLoadingMore}
-                          onClick={loadAllWorkspaceImages}
-                        >
-                          {t.loadAll}
-                        </button>
-                      </div>
-                    ) : null}
-                  </>
-                ) : <div className="empty-state">{allLibraryImages.length === 0 ? t.workspaceEmpty : t.noMatchingRows}</div>}
-              </div>
+              <VirtualThumbnailGrid
+                images={displayedWorkspaceImages}
+                resetKey={`${rootPath}\0${workspaceQuery}\0${workspaceKindFilter}\0${workspaceSourceFilter}`}
+                renderItem={(image) => (
+                  <ThumbnailCard
+                    key={image.id}
+                    image={image}
+                    revision={thumbnailRevision}
+                    active={image.id === selectedImageId}
+                    selected={selectedWorkspaceImageIds.has(image.id)}
+                    archiveLabel={t.sourceArchive}
+                    folderLabel={t.sourceFolder}
+                    onToggle={(event) => toggleWorkspaceImage(image.id, { toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })}
+                    onOpen={() => {
+                      const imageRef = navigationImages.find((item) => item.image.id === image.id);
+                      if (imageRef) {
+                        setSelectedNodeId(imageRef.node.id);
+                      }
+                      setSelectedImageId(image.id);
+                    }}
+                  />
+                )}
+              >
+                {displayedWorkspaceImages.length < filteredWorkspaceImages.length ? (
+                  <div className="thumbnail-grid-actions">
+                    <button
+                      className="thumbnail-grid-more"
+                      type="button"
+                      disabled={workspaceLoadingMore}
+                      onClick={loadMoreWorkspaceImages}
+                    >
+                      {t.loadMore} ({displayedWorkspaceImages.length.toLocaleString()} / {filteredWorkspaceImages.length.toLocaleString()})
+                    </button>
+                    <button
+                      className="thumbnail-grid-more secondary"
+                      type="button"
+                      disabled={workspaceLoadingMore}
+                      onClick={loadAllWorkspaceImages}
+                    >
+                      {t.loadAll}
+                    </button>
+                  </div>
+                ) : null}
+                {filteredWorkspaceImages.length === 0 ? <div className="empty-state">{allLibraryImages.length === 0 ? t.workspaceEmpty : t.noMatchingRows}</div> : null}
+              </VirtualThumbnailGrid>
               <aside className="workspace-inspector">
                 <header>
                   <strong>{activeImage?.name ?? t.noImage}</strong>
@@ -3423,32 +3505,6 @@ function findImage(node: LibraryNode, imageId: string): ImageEntry | null {
   return null;
 }
 
-function mergeScannedNode(current: LibraryNode, scannedNode: LibraryNode): LibraryNode {
-  if (current.id === scannedNode.id) {
-    const currentChildrenById = new Map(current.children.map((child) => [child.id, child]));
-    return {
-      ...scannedNode,
-      children: scannedNode.children.map((child) => {
-        const existing = currentChildrenById.get(child.id);
-        if (existing && child.kind === 'directory' && !child.scanned) {
-          return {
-            ...child,
-            scanned: existing.scanned,
-            images: existing.images,
-            children: existing.children,
-          };
-        }
-        return child;
-      }),
-    };
-  }
-
-  return {
-    ...current,
-    children: current.children.map((child) => mergeScannedNode(child, scannedNode)),
-  };
-}
-
 function readPersistedRootPath(): string {
   return localStorage.getItem(storageKeys.rootPath)?.trim() ?? '';
 }
@@ -3511,20 +3567,6 @@ async function loadImagePayloadByPath(filePath: string, operationId: number): Pr
   return payload;
 }
 
-async function decodeImagePayload(payload: ImagePayload): Promise<void> {
-  const decoder = new Image();
-  decoder.decoding = 'async';
-  decoder.src = payload.dataUri;
-  if (typeof decoder.decode === 'function') {
-    await decoder.decode().catch(() => undefined);
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    decoder.onload = () => resolve();
-    decoder.onerror = () => resolve();
-  });
-}
-
 function prefetchImagePayload(image: ImageEntry, operationId: number): Promise<ImagePayload | null> {
   const cachedPayload = getCachedImagePayload(image);
   if (cachedPayload) {
@@ -3537,8 +3579,8 @@ function prefetchImagePayload(image: ImageEntry, operationId: number): Promise<I
   }
   const generation = imagePayloadCacheGeneration;
   const request = loadImagePayloadByPath(image.path, operationId)
-    .then(async (payload) => {
-      await decodeImagePayload(payload);
+    .then((payload) => {
+      // 預取只保留路徑與標頭資料；不在背景解碼四張完整大圖。
       if (generation === imagePayloadCacheGeneration) {
         cacheImagePayload(image, payload);
       }
@@ -3546,7 +3588,7 @@ function prefetchImagePayload(image: ImageEntry, operationId: number): Promise<I
     })
     .catch(() => null)
     .finally(() => {
-      imagePayloadPrefetches.delete(key);
+      if (imagePayloadPrefetches.get(key) === request) imagePayloadPrefetches.delete(key);
     });
   imagePayloadPrefetches.set(key, request);
   return request;
@@ -3602,7 +3644,12 @@ function parseLibraryCache(raw: string, rootPath: string): PersistedLibraryCache
   }
   try {
     const parsed = JSON.parse(raw) as PersistedLibraryCache;
-    if (!parsed?.tree || parsed.rootPath !== rootPath || !Array.isArray(parsed.expandedNodeIds)) {
+    if (!parsed || parsed.rootPath !== rootPath || !isLibraryTree(parsed.tree)
+      || normalizeFilePath(parsed.tree.path) !== normalizeFilePath(rootPath)
+      || typeof parsed.selectedNodeId !== 'string' || typeof parsed.selectedImageId !== 'string'
+      || !Array.isArray(parsed.expandedNodeIds) || !parsed.expandedNodeIds.every((id) => typeof id === 'string')
+      || !Number.isSafeInteger(parsed.scannedDirectories) || parsed.scannedDirectories < 0
+      || typeof parsed.savedAt !== 'number' || !Number.isFinite(parsed.savedAt)) {
       return null;
     }
     return parsed;
@@ -3666,8 +3713,9 @@ async function writeImagePayloadToClipboard(payload: ImagePayload): Promise<void
 }
 
 async function copyDataUriText(dataUri: string): Promise<void> {
-  await ClipboardSetText(dataUri)
-    .catch(() => navigator.clipboard?.writeText(dataUri).then(() => true));
+  const text = await imageURLToDataURI(dataUri);
+  await ClipboardSetText(text)
+    .catch(() => navigator.clipboard?.writeText(text).then(() => true));
 }
 
 function dataUriToPngBlob(dataUri: string): Promise<Blob> {
@@ -3907,4 +3955,13 @@ function resolveLocale(languagePreference: LanguagePreference): LocaleCode {
 
 function yieldToUI(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+// 清理不能讓 bridge 關閉時的拒絕變成未處理例外。
+function cancelBackendOperation(operationId: number | null) {
+  if (operationId) void window.go?.app?.App?.CancelOperation?.(operationId)?.catch(() => undefined);
+}
+
+function finishBackendOperation(operationId: number) {
+  if (operationId) void window.go?.app?.App?.FinishOperation?.(operationId)?.catch(() => undefined);
 }

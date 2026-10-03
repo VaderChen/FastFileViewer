@@ -9,14 +9,12 @@ APP_OUTPUT_DIR="${APP_OUTPUT_DIR:-$SCRIPT_DIR/dist}"
 APP_PATH="$APP_OUTPUT_DIR/$APP_NAME.app"
 APP_ICON_SOURCE="$SCRIPT_DIR/assets/appicon.png"
 FFMPEG_BIN_DIR="${FASTFILEVIEWER_FFMPEG_BIN_DIR:-$SCRIPT_DIR/third_party/ffmpeg/bin}"
-TMP_ROOT=""
-LOCAL_BUILD_CACHE="${FASTFILEVIEWER_BUILD_CACHE:-${TMPDIR:-/tmp}/fastfileviewer-build-cache}"
+
+BUILD_APP_PATH="$SCRIPT_DIR/build/bin/$APP_NAME.app"
 
 export MACOSX_DEPLOYMENT_TARGET="12.0"
 export CGO_CFLAGS="-mmacosx-version-min=12.0"
 export CGO_LDFLAGS="-mmacosx-version-min=12.0"
-export COPYFILE_DISABLE=1
-export COPY_EXTENDED_ATTRIBUTES_DISABLE=1
 
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 APP_BUNDLE_ID="${APP_BUNDLE_ID:-com.vader.fastfileviewer}"
@@ -55,21 +53,6 @@ fi
 
 export VITE_APP_VERSION="$APP_DISPLAY_VERSION"
 
-cleanup_tmp_root() {
-  if [[ -n "$TMP_ROOT" && -d "$TMP_ROOT" ]]; then
-    rm -rf "$TMP_ROOT"
-  fi
-}
-trap cleanup_tmp_root EXIT
-
-cleanup_appledouble() {
-  local target_path="$1"
-  if [[ -e "$target_path" ]]; then
-    find "$target_path" -name '._*' -delete 2>/dev/null || true
-    find "$target_path" -name '.DS_Store' -delete 2>/dev/null || true
-  fi
-}
-
 cleanup_codesign_artifacts() {
   local target_path="$1"
   if [[ -e "$target_path" ]]; then
@@ -78,12 +61,9 @@ cleanup_codesign_artifacts() {
   fi
 }
 
-prepare_bundled_ffmpeg() {
+validate_bundled_ffmpeg() {
   local source_dir="$FFMPEG_BIN_DIR"
-  local resource_dir="$STAGING_APP_PATH/Contents/Resources/bin"
-  local resource_lib_dir="$STAGING_APP_PATH/Contents/Resources/lib"
-  local tool library dependency version_line configuration_line
-
+  local tool license tool_output version_line configuration_line
   if [[ ! -d "$source_dir" ]]; then
     echo "找不到 LGPL FFmpeg：$source_dir"
     echo "請先執行 scripts/build-ffmpeg-macos.sh，或設定 FASTFILEVIEWER_FFMPEG_BIN_DIR。"
@@ -94,8 +74,18 @@ prepare_bundled_ffmpeg() {
       echo "FFmpeg 目錄缺少可執行檔：$source_dir/$tool"
       exit 1
     fi
-    version_line="$($source_dir/$tool -version | head -1 || true)"
-    configuration_line="$($source_dir/$tool -version | sed -n 's/^configuration: //p' || true)"
+    if ! tool_output="$("$source_dir/$tool" -version 2>&1)"; then
+      echo "FFmpeg 工具無法執行：$source_dir/$tool"
+      echo "$tool_output"
+      exit 1
+    fi
+    version_line="$(printf '%s\n' "$tool_output" | sed -n '1p')"
+    if [[ "$version_line" != "$tool version "* ]] ||
+      ! printf '%s\n' "$tool_output" | grep '^configuration:' >/dev/null; then
+      echo "FFmpeg 版本或組態資訊不完整：$source_dir/$tool"
+      exit 1
+    fi
+    configuration_line="$(printf '%s\n' "$tool_output" | sed -n 's/^configuration: //p')"
     if [[ "$configuration_line" == *"--enable-gpl"* || "$configuration_line" == *"--enable-nonfree"* || "$configuration_line" == *"libx264"* || "$configuration_line" == *"libx265"* || "$configuration_line" == *"libxvid"* ]]; then
       echo "拒絕打包非 LGPL FFmpeg：$version_line"
       echo "請使用未啟用 GPL/nonfree 或 GPL 外部編碼器的建置。"
@@ -103,23 +93,33 @@ prepare_bundled_ffmpeg() {
     fi
     echo "檢查 LGPL FFmpeg：$version_line"
   done
-  mkdir -p "$resource_dir"
-  cp "$source_dir/ffmpeg" "$source_dir/ffprobe" "$resource_dir/"
-  chmod 755 "$resource_dir/ffmpeg" "$resource_dir/ffprobe"
   if [[ ! -d "$source_dir/../lib" ]] || [[ -z "$(find "$source_dir/../lib" -maxdepth 1 -name '*.dylib' -print -quit)" ]]; then
     echo "FFmpeg 目錄缺少動態函式庫：$source_dir/../lib"
     exit 1
   fi
+  for license in ffmpeg/COPYING.LGPLv2.1 opus/COPYING libvpx/LICENSE; do
+    if [[ ! -s "$source_dir/../share/licenses/$license" ]]; then
+      echo "FFmpeg 目錄缺少授權文字：$license"
+      exit 1
+    fi
+  done
+}
+
+prepare_bundled_ffmpeg() {
+  local source_dir="$FFMPEG_BIN_DIR"
+  local resource_dir="$BUILD_APP_PATH/Contents/Resources/bin"
+  local resource_lib_dir="$BUILD_APP_PATH/Contents/Resources/lib"
+  local library dependency
+
+  mkdir -p "$resource_dir"
+  cp "$source_dir/ffmpeg" "$source_dir/ffprobe" "$resource_dir/"
+  chmod 755 "$resource_dir/ffmpeg" "$resource_dir/ffprobe"
   mkdir -p "$resource_lib_dir"
-  rsync -a --include '*.dylib' --exclude '*' "$source_dir/../lib/" "$resource_lib_dir/"
-  if [[ ! -s "$source_dir/../share/licenses/ffmpeg/COPYING.LGPLv2.1" ]]; then
-    echo "FFmpeg 目錄缺少 LGPL 授權文字。"
-    exit 1
-  fi
+  cp -P "$source_dir"/../lib/*.dylib "$resource_lib_dir/"
   cp "$source_dir/../share/licenses/ffmpeg/COPYING.LGPLv2.1" "$APP_LICENSE_DIR/LGPL-2.1-FFmpeg.txt"
   cp "$source_dir/../share/licenses/opus/COPYING" "$APP_LICENSE_DIR/Opus-COPYING.txt"
   cp "$source_dir/../share/licenses/libvpx/LICENSE" "$APP_LICENSE_DIR/libvpx-LICENSE.txt"
-  for library in $(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' -print); do
+  for library in "$resource_lib_dir"/*.dylib(N.); do
     install_name_tool -id "@rpath/$(basename "$library")" "$library"
     while IFS= read -r dependency; do
       [[ -e "$resource_lib_dir/$(basename "$dependency")" ]] || continue
@@ -135,7 +135,7 @@ prepare_bundled_ffmpeg() {
   done
 }
 
-required_commands=(go node npm rsync codesign ditto security install_name_tool otool)
+required_commands=(go node npm codesign ditto security install_name_tool otool)
 for command_name in "${required_commands[@]}"; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "缺少必要指令：$command_name"
@@ -149,10 +149,12 @@ if [[ "$CODESIGN_IDENTITY" != "-" ]] &&
   exit 1
 fi
 
+# Keep the declared macOS deployment target compatible with the Go toolchain.
+export GOTOOLCHAIN="$(awk '$1 == "go" { print "go" $2; exit }' "$SCRIPT_DIR/go.mod")"
+
 cd "$SCRIPT_DIR"
 WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
-WAILS_BIN="$LOCAL_BUILD_CACHE/tools/$WAILS_VERSION/wails"
-FRONTEND_INSTALL_DIR="$LOCAL_BUILD_CACHE/frontend"
+WAILS_BIN="$SCRIPT_DIR/build/tools/$WAILS_VERSION/wails"
 
 if [[ ! -x "$WAILS_BIN" ]]; then
   echo "安裝專案指定的 Wails $WAILS_VERSION ..."
@@ -161,18 +163,10 @@ if [[ ! -x "$WAILS_BIN" ]]; then
 fi
 
 echo "依 package-lock.json 安裝前端依賴..."
-if [[ ! -x "$FRONTEND_INSTALL_DIR/node_modules/.bin/tsc" || ! -f "$FRONTEND_INSTALL_DIR/package-lock.json" || "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_DIR/package-lock.json" ]]; then
-  rm -rf "$FRONTEND_INSTALL_DIR"
-  mkdir -p "$FRONTEND_INSTALL_DIR"
-  cp "$FRONTEND_DIR/package.json" "$FRONTEND_DIR/package-lock.json" "$FRONTEND_INSTALL_DIR/"
-  (cd "$FRONTEND_INSTALL_DIR" && npm ci)
-fi
-if [[ -L "$FRONTEND_DIR/node_modules" ]]; then
-  rm -f "$FRONTEND_DIR/node_modules"
-elif [[ -e "$FRONTEND_DIR/node_modules" ]]; then
-  rm -rf "$FRONTEND_DIR/node_modules"
-fi
-ln -s "$FRONTEND_INSTALL_DIR/node_modules" "$FRONTEND_DIR/node_modules"
+(cd "$FRONTEND_DIR" && npm ci)
+
+echo "建置前端資產：$APP_DISPLAY_VERSION"
+(cd "$FRONTEND_DIR" && npm run build)
 
 echo "驗證 Go 與前端原始碼..."
 go mod verify
@@ -182,10 +176,6 @@ go test -race ./...
 
 echo "產生第三方授權清冊..."
 node "$SCRIPT_DIR/scripts/generate-third-party-notices.mjs"
-
-echo "建置前端資產：$APP_DISPLAY_VERSION"
-(cd "$FRONTEND_DIR" && npm run build)
-cleanup_appledouble "$FRONTEND_DIR/dist"
 
 if command -v git >/dev/null 2>&1 && git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "$SCRIPT_DIR" rev-parse HEAD)}"
@@ -213,88 +203,64 @@ done
 
 BUILD_LDFLAGS="-X github.com/VaderChen/FastFileViewer/internal/app.appVersion=$APP_MARKETING_VERSION -X github.com/VaderChen/FastFileViewer/internal/app.appCommit=$BUILD_COMMIT -X github.com/VaderChen/FastFileViewer/internal/app.appTag=$BUILD_TAG -X github.com/VaderChen/FastFileViewer/internal/app.appBuildState=$BUILD_STATE -X github.com/VaderChen/FastFileViewer/internal/app.appSourceURL=$BUILD_SOURCE_URL"
 
-mkdir -p "$APP_OUTPUT_DIR"
-rm -rf "$APP_PATH"
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fastfileviewer-build.XXXXXX")"
-STAGING_DIR="$TMP_ROOT/project"
-STAGING_APP_PATH="$STAGING_DIR/build/bin/$APP_NAME.app"
-
-echo "同步公開來源到本機暫存建置目錄..."
-mkdir -p "$STAGING_DIR"
-rsync -a \
-  --exclude '/.git/' \
-  --exclude '/.codex-tmp/' \
-  --exclude '/.env*' \
-  --exclude '.DS_Store' \
-  --exclude '._*' \
-  --exclude '*.bak' \
-  --exclude '/cert/' \
-  --exclude '/data/' \
-  --exclude '/dist/' \
-  --exclude '/build/bin/' \
-  "$SCRIPT_DIR/" "$STAGING_DIR/"
-cleanup_appledouble "$STAGING_DIR"
+validate_bundled_ffmpeg
 
 echo "準備 App 圖示：$APP_ICON_SOURCE"
-mkdir -p "$STAGING_DIR/build"
-cp "$APP_ICON_SOURCE" "$STAGING_DIR/build/appicon.png"
+mkdir -p "$SCRIPT_DIR/build"
+cp "$APP_ICON_SOURCE" "$SCRIPT_DIR/build/appicon.png"
 
-echo "建立非沙盒 Wails App..."
-(
-  cd "$STAGING_DIR"
-  "$WAILS_BIN" build -clean -s -trimpath -ldflags "$BUILD_LDFLAGS"
-)
-if [[ ! -d "$STAGING_APP_PATH" ]]; then
-  echo "建置失敗：找不到 $STAGING_APP_PATH"
+echo "從專案目錄建立非沙盒 Wails App..."
+"$WAILS_BIN" build -clean -s -m -trimpath -nosyncgomod -ldflags "$BUILD_LDFLAGS"
+if [[ ! -d "$BUILD_APP_PATH" ]]; then
+  echo "建置失敗：找不到 $BUILD_APP_PATH"
   exit 1
 fi
-if [[ ! -s "$STAGING_APP_PATH/Contents/Resources/iconfile.icns" ]]; then
+if [[ ! -s "$BUILD_APP_PATH/Contents/Resources/iconfile.icns" ]]; then
   echo "建置失敗：App Bundle 缺少 iconfile.icns"
   exit 1
 fi
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_MARKETING_VERSION" "$STAGING_APP_PATH/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUNDLE_VERSION" "$STAGING_APP_PATH/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $APP_BUNDLE_ID" "$STAGING_APP_PATH/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion 12.0" "$STAGING_APP_PATH/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :NSRemovableVolumesUsageDescription string FastFileViewer 需要讀取外接磁碟中的檔案。" "$STAGING_APP_PATH/Contents/Info.plist" 2>/dev/null ||
-  /usr/libexec/PlistBuddy -c "Set :NSRemovableVolumesUsageDescription FastFileViewer 需要讀取外接磁碟中的檔案。" "$STAGING_APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_MARKETING_VERSION" "$BUILD_APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUNDLE_VERSION" "$BUILD_APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $APP_BUNDLE_ID" "$BUILD_APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion 12.0" "$BUILD_APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :NSRemovableVolumesUsageDescription string FastFileViewer 需要讀取外接磁碟中的檔案。" "$BUILD_APP_PATH/Contents/Info.plist" 2>/dev/null ||
+  /usr/libexec/PlistBuddy -c "Set :NSRemovableVolumesUsageDescription FastFileViewer 需要讀取外接磁碟中的檔案。" "$BUILD_APP_PATH/Contents/Info.plist"
 
-APP_LICENSE_DIR="$STAGING_APP_PATH/Contents/Resources/Licenses"
+APP_LICENSE_DIR="$BUILD_APP_PATH/Contents/Resources/Licenses"
 mkdir -p "$APP_LICENSE_DIR"
-cp "$STAGING_DIR/LICENSE" "$APP_LICENSE_DIR/GPL-3.0.txt"
-cp "$STAGING_DIR/THIRD-PARTY-NOTICES.md" "$APP_LICENSE_DIR/THIRD-PARTY-NOTICES.md"
-cp "$STAGING_DIR/THIRD-PARTY-LICENSES.txt" "$APP_LICENSE_DIR/THIRD-PARTY-LICENSES.txt"
-node "$STAGING_DIR/scripts/write-build-metadata.mjs" \
-  "$STAGING_APP_PATH/Contents/Resources/build-metadata.json" \
+cp "$SCRIPT_DIR"/LICENSE*.md "$APP_LICENSE_DIR/"
+cp "$SCRIPT_DIR/THIRD-PARTY-NOTICES.md" "$APP_LICENSE_DIR/THIRD-PARTY-NOTICES.md"
+cp "$SCRIPT_DIR/THIRD-PARTY-LICENSES.txt" "$APP_LICENSE_DIR/THIRD-PARTY-LICENSES.txt"
+node "$SCRIPT_DIR/scripts/write-build-metadata.mjs" \
+  "$BUILD_APP_PATH/Contents/Resources/build-metadata.json" \
   "$APP_MARKETING_VERSION" "$BUILD_COMMIT" "$BUILD_TAG" "$BUILD_STATE" "$BUILD_SOURCE_URL"
 
 prepare_bundled_ffmpeg
 
-rm -f "$STAGING_APP_PATH/Contents/embedded.provisionprofile"
-cleanup_appledouble "$STAGING_APP_PATH"
-cleanup_codesign_artifacts "$STAGING_APP_PATH"
-chmod -R u+rwX,go+rX "$STAGING_APP_PATH"
-xattr -cr "$STAGING_APP_PATH" 2>/dev/null || true
+rm -f "$BUILD_APP_PATH/Contents/embedded.provisionprofile"
+cleanup_codesign_artifacts "$BUILD_APP_PATH"
+chmod -R u+rwX,go+rX "$BUILD_APP_PATH"
+xattr -cr "$BUILD_APP_PATH" 2>/dev/null || true
 
-# 驗證整個 App 的發行內容（包含 FFmpeg）。
-node "$SCRIPT_DIR/scripts/check-privacy.mjs" --artifact "$STAGING_APP_PATH"
+# 檢查整個 App（包含 FFmpeg），阻止本機路徑或機密進入發行產物。
+node "$SCRIPT_DIR/scripts/check-privacy.mjs" --artifact "$BUILD_APP_PATH"
 
-if [[ -d "$STAGING_APP_PATH/Contents/Resources/bin" ]]; then
+if [[ -d "$BUILD_APP_PATH/Contents/Resources/bin" ]]; then
   NESTED_SIGNING_ARGUMENTS=(--force --sign "$CODESIGN_IDENTITY" --options runtime)
   FFMPEG_ENTITLEMENTS_ARGUMENTS=()
-  if [[ -f "$STAGING_DIR/build/darwin/FFmpeg.entitlements.plist" ]]; then
-    FFMPEG_ENTITLEMENTS_ARGUMENTS=(--entitlements "$STAGING_DIR/build/darwin/FFmpeg.entitlements.plist")
+  if [[ -f "$SCRIPT_DIR/build/darwin/FFmpeg.entitlements.plist" ]]; then
+    FFMPEG_ENTITLEMENTS_ARGUMENTS=(--entitlements "$SCRIPT_DIR/build/darwin/FFmpeg.entitlements.plist")
   else
     echo "找不到選用的 FFmpeg entitlements，使用一般簽章流程..."
   fi
   if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
     NESTED_SIGNING_ARGUMENTS+=(--timestamp)
   fi
-  for nested_binary in $(find "$STAGING_APP_PATH/Contents/Resources/lib" -maxdepth 1 -type f -name '*.dylib' -print); do
+  for nested_binary in "$BUILD_APP_PATH/Contents/Resources/lib"/*.dylib(N.); do
     codesign "${NESTED_SIGNING_ARGUMENTS[@]}" "$nested_binary"
   done
-  for nested_binary in "$STAGING_APP_PATH/Contents/Resources/bin/ffmpeg" "$STAGING_APP_PATH/Contents/Resources/bin/ffprobe"; do
+  for nested_binary in "$BUILD_APP_PATH/Contents/Resources/bin/ffmpeg" "$BUILD_APP_PATH/Contents/Resources/bin/ffprobe"; do
     codesign "${NESTED_SIGNING_ARGUMENTS[@]}" \
       "${FFMPEG_ENTITLEMENTS_ARGUMENTS[@]}" "$nested_binary"
   done
@@ -307,12 +273,14 @@ else
   echo "使用本機簽章設定簽署..."
   SIGNING_ARGUMENTS+=(--timestamp)
 fi
-codesign "${SIGNING_ARGUMENTS[@]}" "$STAGING_APP_PATH"
-codesign --verify --deep --strict --verbose=2 "$STAGING_APP_PATH"
+codesign "${SIGNING_ARGUMENTS[@]}" "$BUILD_APP_PATH"
+codesign --verify --deep --strict --verbose=2 "$BUILD_APP_PATH"
 
-ditto --norsrc --noextattr --noqtn "$STAGING_APP_PATH" "$APP_PATH"
-cleanup_appledouble "$APP_PATH"
-xattr -cr "$APP_PATH" 2>/dev/null || true
+mkdir -p "$APP_OUTPUT_DIR"
+if [[ "${APP_PATH:A}" != "${BUILD_APP_PATH:A}" ]]; then
+  rm -rf "$APP_PATH"
+  ditto --noqtn "$BUILD_APP_PATH" "$APP_PATH"
+fi
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 echo "完成：$APP_PATH"
