@@ -141,9 +141,15 @@ Wails 綁定五個服務，各自管理對應功能的生命週期狀態：
 
 腳本會：
 
-1. 依 `go.mod` 將相同版本的 Wails CLI 安裝至 `build/tools/<version>/wails`。
+1. 透過 `scripts/prepare-wails-cli.mjs`，依 `go.mod` 準備相同版本的 Wails CLI，快取於 `build/tools/<version>/signing-<hash>/wails`。
 2. 依 `package-lock.json` 將前端依賴直接安裝至 `frontend/node_modules`。
 3. 在專案目錄啟動 Wails dev，由 Wails／Vite 監看原始碼並熱更新。
+
+`run.sh` 與 `build.sh` 共用 CLI 準備流程。首次使用時，將 Wails 原始碼複製至暫存目錄，以 Go overlay 加入 `scripts/wailscompat/appledouble.go`；完成後刪除暫存來源，保留 CLI 快取，不修改共用 Go module cache。版本或修正內容改變時會重新建置 CLI。
+
+相容修正在每次 App 封裝完成後、原本的 `codesign` 執行前，僅清理生成 Bundle 內具有 AppleDouble v2 標頭的 `._` 中繼檔；保留一般同名前綴檔案，不追蹤符號連結。ExFAT 可能在編譯期間重新產生這些檔案，因此啟動前清除或只執行 `xattr -rc` 並不足夠。原始碼位置、簽章流程及 Wails 熱更新維持不變；Wails 簽章程式碼不符合預期時，準備流程會明確失敗。
+
+正式 App 加入影音工具、授權與建置資訊後，`build.sh` 會在最終 Bundle 簽章前執行 `scripts/clean-bundle-metadata.mjs`，清除後續複製及內層簽章重新產生的 AppleDouble。清理同樣限定於 App 內、驗證檔案標頭且不跟隨符號連結；一般 `._` 檔案保留。
 
 ## 公開版建置
 
@@ -197,3 +203,20 @@ node scripts/generate-third-party-notices.mjs
 4. 驗證 App 內含 `Contents/Resources/Licenses` 與 `build-metadata.json`。
 5. 確認 About 的授權說明與 `LICENSE.md` 一致，並顯示來源 URL 與 commit/tag/build state。
 6. 建立 Git tag 後再製作公開 Release，並核對下載檔。
+
+## 3D 檔案預覽
+
+設定順序為「顯示 → 影像檔案 → 文件檔案 → 程式語言 → 3D 檔案 → 媒體與字幕 → 關於」。模型格式使用獨立的 `enabledModelExtensions.v1` 本機設定，預設全選；修改後在下一次掃描套用。掃描結果的 `kind` 為 `model`，工作區可單獨篩選，圖庫快取可保留模型項目。
+
+- `internal/app/model.go` 提供 `PrepareModelByPath` 與 `/model/<id>/<resource>`。本機檔案使用 `os.Root` 限制模型目錄邊界並串流讀取；壓縮檔沿用既有 ZIP／TAR 讀取器，最多同時保留兩份資源緩衝區。主檔與依賴皆限 128 MiB，只接受模型、材質、緩衝區與指定貼圖格式。
+- `ModelPreview.tsx` 管理載入、取消、重試與多語介面。`modelViewer.ts` 在首次選取模型時動態載入；Three.js 核心與格式解析器分開封裝，只載入目前檔案需要的解析器。圖片與文件瀏覽不必先載入 3D 引擎；開啟 STL 不會預先載入 glTF、FBX 或 3MF 解析器。
+- `modelLoaders.ts` 處理 GLB／glTF 2.0、OBJ＋MTL、STL、PLY（網格與點雲）、FBX 與 3MF。glTF 支援 Meshopt；Draco、KTX2 與動畫播放未啟用。MTL 的貼圖依各 MTL 所在目錄解析；所有外部資源仍必須留在模型目錄內。模型中指向遠端或其他本機路徑的資源不會連出讀取。
+- 相機依模型邊界置中並縮放，支援左鍵旋轉、右鍵或 Shift＋左鍵平移、滾輪縮放及重設。靜態場景的世界矩陣只在準備完成時更新；操作時由相機改變視角。共用材質與幾何緩衝區只檢查一次，只有使用場景環境光的材質才建立環境圖。
+- 靜止、背景及等待模型完成時不持續繪圖；同一幀的多次變更合併處理。ResizeObserver 與視窗 resize 事件共用尺寸檢查，只在實際尺寸或像素倍率改變時配置繪圖緩衝區。像素倍率最多 2，畫布最長邊最多 4096 像素。
+- 已知長度的模型下載直接填入一份目的緩衝區；缺少或不準確的長度仍以串流上限檢查。進度只在整數百分比改變時通知介面，避免每個小資料區塊都觸發 React 更新。
+- 單一預覽最多 500 萬個幾何頂點、256 MiB 幾何緩衝區、32 Mi 個貼圖像素及 256 個資源 URL。glTF 配置宣告、PLY 元素數與 3MF 解壓大小會先驗證。選取變更或預覽關閉時取消讀取，釋放幾何、材質、貼圖、ImageBitmap、骨架、環境圖、Object URL 與 WebGL context；延遲完成的結果也會釋放。
+- `modelDisposal.ts` 使用弱參照集合記錄已釋放的共用資源。關閉預覽時立即清空場景與材質集合，只保留尚未完成的貼圖處理；延遲完成的圖片會立即回收，不反覆巡覽整個場景，也不重複關閉相同 ImageBitmap。
+
+驗證包含 `go test -race ./...`、`npm test`、`npm run build`，以及原生 macOS WebKit 的七種格式渲染、一般目錄與 ZIP 的相對貼圖、缺少貼圖提示、滑鼠操作、視角重設、靜止不重繪與取消／關閉回收。瀏覽器檢查同時使用 HTTP 與 App 的 `wails://` URL scheme。
+
+3D 效能比較可在 `frontend` 執行 `node --expose-gc benchmarks/model-preview.mts`。本機合成測試中，64 MiB 輸入串流的 ArrayBuffer 用量由約 128 MiB 降至 68 MiB，進度通知由 1,024 次降至 101 次；5,000 個共用幾何／材質網格的檢查中位數由約 4.13 ms 降至 0.82 ms。前者只衡量輸入緩衝區，不代表整個 App、WebKit 或 GPU 的總記憶體；實際時間依模型與硬體而異。13 組原生 WebKit 比較涵蓋七種格式、點雲、不受光材質與貼圖情境，修改前後畫素一致，並驗證旋轉、平移、縮放、重設及快速取消。

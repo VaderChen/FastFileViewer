@@ -107,3 +107,100 @@ func TestSignedReleaseFixture(t *testing.T) {
 		t.Fatal("wrong release accepted")
 	}
 }
+
+// Exercise the actual signed helper and WebKit readiness handshake. Checking the
+// downloaded app alone cannot detect a helper that macOS refuses to execute.
+func TestSignedInstallerLaunchFixture(t *testing.T) {
+	fixture := os.Getenv("FASTFILEVIEWER_UPDATE_TEST_APP")
+	if fixture == "" {
+		t.Skip("set FASTFILEVIEWER_UPDATE_TEST_APP to validate the signed installer")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "Installed.app")
+	if output, err := command(ctx, "/usr/bin/ditto", "--noqtn", fixture, target); err != nil {
+		t.Fatalf("copy fixture: %v: %s", err, output)
+	}
+	team, identifier, err := bundleIdentity(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "Contents", "Resources", "build-metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var release Release
+	if err := json.Unmarshal(data, &release); err != nil || release.Tag == "" {
+		t.Fatal("missing release metadata")
+	}
+	root, err := os.MkdirTemp(parent, stagingPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := installJob{Root: root, Target: target, ParentPID: os.Getpid(), Team: team, BundleID: identifier, Release: release, Locale: "en"}
+	if err := copyInstaller(ctx, job); err != nil {
+		t.Fatalf("prepare signed installer: %v", err)
+	}
+	if err := verifyBundle(ctx, filepath.Join(root, installerBundleName), team, identifier, release.Tag); err != nil {
+		t.Fatalf("copied installer rejected: %v", err)
+	}
+	payload, err := json.Marshal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobPath := filepath.Join(root, "job.json")
+	if err := os.WriteFile(jobPath, payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := detachedCommand(filepath.Join(root, installerBundleName, "Contents", "MacOS", "FastFileViewer"), helperFlag, jobPath)
+	var output limitedOutput
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	stop := func() {
+		_ = cmd.Process.Kill()
+		<-exited
+	}
+	defer stop()
+	if err := waitForFile(ctx, filepath.Join(root, "ready"), exited, 20*time.Second); err != nil {
+		stop()
+		t.Fatalf("installer did not render and acknowledge readiness: %v: %s", err, output.data)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("installed fixture changed before parent exit: %v", err)
+	}
+	if _, err := os.Lstat(job.backup()); !os.IsNotExist(err) {
+		t.Fatal("installer replaced the app before parent exit")
+	}
+}
+
+func TestInstallerPreparationRefusesExistingBundle(t *testing.T) {
+	root := t.TempDir()
+	destination := filepath.Join(root, installerBundleName)
+	if err := os.Mkdir(destination, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(destination, "keep")
+	if err := os.WriteFile(marker, []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyInstaller(context.Background(), installJob{Root: root, Target: "missing.app"}); err == nil {
+		t.Fatal("overwrote an existing installer")
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "existing" {
+		t.Fatal("existing installer contents changed")
+	}
+}
+
+func TestInstallerLaunchReportsRestartFailure(t *testing.T) {
+	if err := LaunchInstaller(context.Background(), t.TempDir()); err == nil || err.Error() != "restart" {
+		t.Fatalf("wanted installer startup error, got %v", err)
+	}
+}

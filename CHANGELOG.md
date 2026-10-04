@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.26.1004 build 0945 — 2026-10-04
+
+- Reduce 3D input buffering and progress updates, load format parsers on demand, and avoid repeated material inspection, static scene matrix updates, and redundant canvas resizing.
+- Release cancelled model scenes immediately, close late/shared images once, and skip environment-map generation for materials that do not use it; preserve preview rendering and mouse controls.
+- Fix automatic-update preparation by launching the installer helper from a complete signed App bundle; add a real signed-helper readiness check. Older affected installations may need one manual DMG update.
+- Right-align Check for Updates and remove the requested build-source, license, and notice rows from About; retain bundled license texts and build metadata.
+- Fix Wails development and build signing failures on ExFAT by removing generated AppleDouble metadata immediately before signing, including during hot rebuilds.
+- Add a 3D Files Settings tab, independent model format selections, library icons/counts, workspace filtering, and Finder associations for GLB, glTF, OBJ, STL, PLY, FBX, and 3MF.
+- Render local and archived models with rotation, panning, zoom, and reset controls; load local materials/textures within the model directory.
+- Load the 3D renderer on demand, render only after changes, cancel pending previews, and release geometry, textures, object URLs, and WebGL resources when switching files.
+- Bound model reads and preview resources, report unsupported or incomplete models, and rebuild STL normals when needed.
+
 ## 1.26.1004 build 0026 — 2026-10-04
 
 ### File information display

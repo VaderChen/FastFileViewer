@@ -165,3 +165,23 @@ GOTOOLCHAIN=go1.26.6 go test ./internal/app -run '^$' -bench 'Benchmark(LibraryN
 ```sh
 go test ./internal/app -run '^$' -bench BenchmarkZIPEntryLookup -benchmem -benchtime=300ms
 ```
+
+## 3D 預覽（1.26.1004 build 0945）
+
+3D 渲染維持既有材質、畫質及滑鼠操作。格式解析器只在選取對應模型時載入；模型輸入優先直接填入單一緩衝區，整數百分比改變時才更新進度。共用材質只檢查一次，靜態場景完成後固定世界矩陣；畫布尺寸與像素倍率相同時不重新配置。取消預覽時立即清空場景集合，延遲完成的貼圖也會回收。
+
+在 `frontend` 執行：
+
+```bash
+node --expose-gc benchmarks/model-preview.mts
+```
+
+| 合成案例 | 修改前 | 修改後 |
+| --- | --- | --- |
+| 64 MiB 串流輸入的 ArrayBuffer 用量 | 約 128 MiB | 約 68 MiB |
+| 相同輸入的進度通知 | 1,024 次 | 101 次 |
+| 5,000 個共用幾何／材質網格的檢查中位數 | 4.13 ms | 0.82 ms |
+
+基準保留修改前的讀取與檢查實作作為比較；輸入每區塊 64 KiB，並定期允許 GC，模型檢查則先暖機、量測五輪後取中位數。記憶體只衡量輸入 ArrayBuffer，不包含整個 App、WebKit、模型解析、貼圖解碼或 GPU；時間與模型內容及硬體有關，不能推算整體 App 的等比例加速。
+
+13 組原生 macOS WebKit 比較涵蓋七種格式、點雲、不受光材質、正常與缺少貼圖及受限資源；修改前後畫素一致，旋轉、平移、縮放、重設與快速取消通過。正式打包另驗證 HTTP 與 `wails://` 的按需載入及相同操作。

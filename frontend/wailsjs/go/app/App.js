@@ -86,8 +86,8 @@ export function SaveLibraryCache(arg1, arg2) {
   return window['go']['app']['App']['SaveLibraryCache'](arg1, arg2);
 }
 
-export function ScanDirectory(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['ScanDirectory'](arg1, arg2, arg3, arg4, arg5);
+export function ScanDirectory(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['ScanDirectory'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function SelectDirectory(arg1) {

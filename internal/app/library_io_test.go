@@ -26,7 +26,7 @@ func TestScanUsesSymlinkTargetSizeAndSkipsDirectoryAliases(t *testing.T) {
 	if err := os.Symlink(directory, filepath.Join(directory, "folder.png")); err != nil {
 		t.Fatal(err)
 	}
-	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestLibrarySkipsAndRejectsSpecialFiles(t *testing.T) {
 		t.Fatalf("mkfifo: %v: %s", err, output)
 	}
 	application := New().Library
-	result, err := application.ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := application.ScanDirectory(directory, nil, nil, nil, nil, 0)
 	if err != nil || len(result.Node.Images) != 0 {
 		t.Fatalf("FIFO included in library: %#v, %v", result, err)
 	}

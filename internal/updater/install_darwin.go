@@ -20,6 +20,8 @@ import (
 
 var identityPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 
+const installerBundleName = "Installer.app"
+
 type limitedOutput struct{ data []byte }
 
 func (b *limitedOutput) Write(p []byte) (int, error) {
@@ -196,7 +198,7 @@ func Prepare(ctx context.Context, client *Client, release Release, locale string
 	if err := verifyBundle(ctx, job.staged(), team, identifier, release.Tag); err != nil {
 		return "", cleanup, err
 	}
-	if err := copyInstaller(filepath.Join(root, "installer")); err != nil {
+	if err := copyInstaller(ctx, job); err != nil {
 		return "", cleanup, err
 	}
 	payload, err := json.Marshal(job)
@@ -217,26 +219,17 @@ func volumeMounted(root, mount string) bool {
 	return rootInfo.Fsid != mountInfo.Fsid
 }
 
-func copyInstaller(destination string) error {
-	executable, err := os.Executable()
-	if err != nil {
-		return err
+func copyInstaller(ctx context.Context, job installJob) error {
+	destination := filepath.Join(job.Root, installerBundleName)
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		return errors.New("install")
 	}
-	source, err := os.Open(executable)
-	if err != nil {
-		return err
+	// The executable's signature seals Info.plist and the bundle resources.
+	// Keep the complete signed bundle so macOS can launch the independent helper.
+	if _, err := command(ctx, "/usr/bin/ditto", "--noqtn", job.Target, destination); err != nil {
+		return errors.New("install")
 	}
-	defer source.Close()
-	target, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(target, source)
-	closeErr := target.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
+	return verifyBundle(ctx, destination, job.Team, job.BundleID, "")
 }
 
 func detachedCommand(path string, args ...string) *exec.Cmd {
@@ -246,15 +239,15 @@ func detachedCommand(path string, args ...string) *exec.Cmd {
 }
 
 func LaunchInstaller(ctx context.Context, root string) error {
-	cmd := detachedCommand(filepath.Join(root, "installer"), helperFlag, filepath.Join(root, "job.json"))
+	cmd := detachedCommand(filepath.Join(root, installerBundleName, "Contents", "MacOS", "FastFileViewer"), helperFlag, filepath.Join(root, "job.json"))
 	if err := cmd.Start(); err != nil {
-		return errors.New("install")
+		return errors.New("restart")
 	}
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited) }()
 	if err := waitForFile(ctx, filepath.Join(root, "ready"), exited, 30*time.Second); err != nil {
 		_ = cmd.Process.Kill()
-		return errors.New("install")
+		return errors.New("restart")
 	}
 	return nil
 }

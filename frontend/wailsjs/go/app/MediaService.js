@@ -18,6 +18,10 @@ export function PrepareMediaByPath(arg1, arg2) {
   return window['go']['app']['MediaService']['PrepareMediaByPath'](arg1, arg2);
 }
 
+export function PrepareModelByPath(arg1) {
+  return window['go']['app']['MediaService']['PrepareModelByPath'](arg1);
+}
+
 export function ReleasePlaybackCache(arg1) {
   return window['go']['app']['MediaService']['ReleasePlaybackCache'](arg1);
 }

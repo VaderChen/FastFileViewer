@@ -20,14 +20,7 @@ done
 export GOTOOLCHAIN="$(awk '$1 == "go" { print "go" $2; exit }' "$SCRIPT_DIR/go.mod")"
 
 cd "$SCRIPT_DIR"
-WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
-WAILS_BIN="$SCRIPT_DIR/build/tools/$WAILS_VERSION/wails"
-
-if [[ ! -x "$WAILS_BIN" ]]; then
-  echo "安裝專案指定的 Wails $WAILS_VERSION ..."
-  mkdir -p "$(dirname "$WAILS_BIN")"
-  GOBIN="$(dirname "$WAILS_BIN")" GO111MODULE=on go install "github.com/wailsapp/wails/v2/cmd/wails@$WAILS_VERSION"
-fi
+WAILS_BIN="$(node "$SCRIPT_DIR/scripts/prepare-wails-cli.mjs")"
 
 echo "依 package-lock.json 安裝前端依賴..."
 (cd "$FRONTEND_DIR" && npm ci)

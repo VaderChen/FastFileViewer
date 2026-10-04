@@ -1,6 +1,6 @@
 import type { ImageEntry } from './types';
 
-export type WorkspaceKindFilter = 'all' | 'image' | 'document' | 'media';
+export type WorkspaceKindFilter = 'all' | 'image' | 'document' | 'model' | 'media';
 export type WorkspaceSourceFilter = 'all' | 'file' | 'archive';
 
 export function filterWorkspaceEntries(
@@ -19,9 +19,10 @@ export function filterWorkspaceEntries(
     if (kindFilter === 'image' && entry.kind !== 'image') {
       return false;
     }
-    if (kindFilter === 'document' && (entry.kind === 'image' || isMediaKindValue(entry.kind))) {
+    if (kindFilter === 'document' && (entry.kind === 'image' || entry.kind === 'model' || isMediaKindValue(entry.kind))) {
       return false;
     }
+    if (kindFilter === 'model' && entry.kind !== 'model') return false;
     if (kindFilter === 'media' && !isMediaKindValue(entry.kind)) {
       return false;
     }

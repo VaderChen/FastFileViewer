@@ -15,6 +15,7 @@ interface LibraryCounts {
   images: number;
   documents: number;
   media: number;
+  models: number;
   archives: number;
 }
 
@@ -70,9 +71,10 @@ export function collectImageRefs(node: LibraryNode): ImageNavigationItem[] {
 export function libraryCounts(node: LibraryNode): LibraryCounts {
   const cached = nodeCounts.get(node);
   if (cached) return cached;
-  const counts = { entries: node.images.length, images: 0, documents: 0, media: 0, archives: node.kind === 'archive' ? 1 : 0 };
+  const counts = { entries: node.images.length, images: 0, documents: 0, media: 0, models: 0, archives: node.kind === 'archive' ? 1 : 0 };
   for (const entry of node.images) {
     if (entry.kind === 'image') counts.images++;
+    else if (entry.kind === 'model') counts.models++;
     else if (entry.kind === 'video' || entry.kind === 'audio' || entry.kind === 'subtitle') counts.media++;
     else counts.documents++;
   }
@@ -82,6 +84,7 @@ export function libraryCounts(node: LibraryNode): LibraryCounts {
     counts.images += childCounts.images;
     counts.documents += childCounts.documents;
     counts.media += childCounts.media;
+    counts.models += childCounts.models;
     counts.archives += childCounts.archives;
   }
   nodeCounts.set(node, counts);

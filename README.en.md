@@ -12,12 +12,16 @@
 
 ## Latest release
 
-[1.26.1004 build 0026](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0026) fixes clipped file information at the bottom of the viewer. The information area now grows with its content and wraps in narrow panes, keeping image EXIF, media details, and SHA-256 controls visible. Requires Apple Silicon and macOS 12 or later. Choose **Check for Updates** in About to install the new release.
+[1.26.1004 build 0945](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0945) adds interactive 3D previews for GLB/glTF, OBJ, STL, PLY, FBX, and 3MF, with lower input-buffer memory use and less repeated material inspection and drawing-buffer allocation. It also fixes installer-helper startup and ExFAT development signing, and simplifies About. Requires Apple Silicon and macOS 12 or later. If an older app fails near 65% during updating, install this release manually from the DMG once.
 
-See the [changelog](CHANGELOG.md), [release notes](doc/release-1.26.1004-build-0026.md), [function review](doc/function-optimization-followup.md), and [benchmarks and measurement limits](doc/performance.md).
+See the [changelog](CHANGELOG.md), [release notes](doc/release-1.26.1004-build-0945.md), [function review](doc/function-optimization-followup.md), and [benchmarks and measurement limits](doc/performance.md).
 
 ## Features
 
+- A **3D Files** Settings tab before **Media & Subtitles** enables GLB, glTF, OBJ, STL, PLY, FBX, and 3MF previews from folders or ZIP/TAR/TGZ/TAR.GZ archives.
+- Drag with the left mouse button to rotate, right or Shift + left to pan, and use the wheel to zoom. **Reset view** fits the model again. OBJ supports MTL materials; glTF/OBJ textures and buffers must be in the model directory or a subdirectory. Missing textures produce a warning while available geometry remains visible.
+- 3D previews are static. glTF 2.0 supports ordinary and Meshopt data; Draco/KTX2, animation playback, STEP/IGES, and native Blender projects are not supported. Each model/resource is limited to 128 MiB, with additional geometry and texture budgets for complex models.
+- Load 3D parsers on demand, avoid repeated world-matrix updates for static scenes and unchanged drawing-buffer allocations, and release preview resources when switching or cancelling models.
 - Incrementally scan local folders into a unified tree of images, documents, source code, media, and subtitles.
 - Browse supported content inside ZIP, TAR, TGZ, and TAR.GZ archives without extracting them.
 - Preview common image, text, Markdown, structured-data, configuration, and source-code formats.
@@ -64,7 +68,7 @@ cd FastFileViewer
 ./run.sh
 ```
 
-The development script runs Wails directly in the project directory. Frontend dependencies are installed in `frontend/node_modules`, and the pinned Wails CLI is installed in `build/tools`.
+The development script runs Wails directly in the project directory. Frontend dependencies are installed in `frontend/node_modules`, and the pinned Wails CLI is installed in `build/tools`. Development and release builds use a signing compatibility fix that removes AppleDouble metadata from the generated app after packaging and before signing, preventing failures caused by `._` files on ExFAT volumes.
 
 ## Build
 

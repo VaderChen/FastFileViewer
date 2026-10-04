@@ -161,6 +161,11 @@ const documentsByHash = new Map();
 
 for (const packageInfo of packages) {
   const documents = findLicenseDocuments(packageInfo.directory);
+  // Three.js bundles these libraries as source modules; npm's dependency graph
+  // does not list them, but the model loaders ship them in the renderer chunk.
+  if (packageInfo.ecosystem === "npm" && packageInfo.name === "three") {
+    documents.push(...findLicenseDocuments(join(projectRoot, "third_party", "three")));
+  }
   if (documents.length === 0) {
     throw new Error(`${packageInfo.ecosystem} 套件 ${packageInfo.name}@${packageInfo.version} 找不到 LICENSE、COPYING 或 NOTICE 文件。`);
   }

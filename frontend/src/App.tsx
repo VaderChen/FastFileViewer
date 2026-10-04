@@ -23,6 +23,7 @@ import {
   faCompress,
   faCircleCheck,
   faDownload,
+  faCube,
   faExpand,
   faFileExport,
   faFileLines,
@@ -65,6 +66,7 @@ import { decodeImageURL, imageURLToDataURI } from './imageTransport';
 import { formatBytes } from './format';
 import type { WorkspaceKindFilter, WorkspaceSourceFilter } from './workspaceFilters';
 import { MediaPlayer } from './MediaPlayer';
+import { ModelPreview } from './ModelPreview';
 import { findNextAudioEntry, findSidecarSubtitle } from './mediaSupport';
 import appIconURL from '../../assets/appicon.png';
 
@@ -73,6 +75,7 @@ const fallbackBootstrap: BootstrapPayload = {
   supportedImages: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff', '.heic', '.dng', '.crw', '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.orf', '.rw2', '.rwl', '.pef', '.dcr', '.kdc', '.3fr', '.iiq', '.mef', '.mos', '.x3f', '.raw', '.srw', '.erf', '.mrw', '.gpr', '.bay', '.cap', '.r3d', '.fff', '.ptx', '.pxn'],
   supportedDocuments: ['.pdf', '.txt', '.md', '.markdown', '.json', '.jsonc', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.config', '.env', '.properties', '.lock', '.log', '.csv', '.tsv'],
   supportedCode: ['.go', '.rs', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.cs', '.java', '.kt', '.kts', '.swift', '.m', '.mm', '.py', '.pyw', '.rb', '.php', '.js', '.jsx', '.ts', '.tsx', '.vue', '.svelte', '.html', '.htm', '.css', '.scss', '.sass', '.less', '.sql', '.graphql', '.gql', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd', '.lua', '.pl', '.r', '.dart', '.ex', '.exs', '.erl', '.hrl', '.fs', '.fsx', '.vb', '.scala', '.clj', '.cljs', '.hs', '.lhs', '.sol', '.asm', '.s', '.dockerfile', '.makefile', '.gradle'],
+  supportedModels: ['.glb', '.gltf', '.obj', '.stl', '.ply', '.fbx', '.3mf'],
   supportedMedia: ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.m2ts', '.mp3', '.mp2', '.m4a', '.m4b', '.wav', '.aac', '.flac', '.ogg', '.oga', '.opus', '.aif', '.aiff', '.aifc', '.caf', '.wma', '.ape', '.wv', '.alac', '.ac3', '.amr', '.mka', '.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'],
   supportedPacks: ['.zip', '.tar', '.tgz', '.tar.gz'],
 };
@@ -270,6 +273,7 @@ const messages = {
     imageFormats: '影像檔案',
     documentFormats: '文件檔案',
     codeFormats: '程式語言',
+    modelFormats: '3D 檔案',
     mediaFormats: '媒體與字幕',
     clearAll: '全不選',
     about: '關於',
@@ -290,11 +294,8 @@ const messages = {
     hardwareInfo: '硬體資訊',
     osVersion: 'OS 版本',
     appVersion: 'APP 版本',
-    buildInfo: '建置來源',
     sourceCode: '原始碼',
-    license: '授權',
     copySourceUrl: '複製 GitHub 網址',
-    noWarranty: '本程式依原始碼公開・禁止商業販售授權提供，不附帶任何擔保。完整授權與第三方通知包含於 App Bundle 的 Resources/Licenses。',
     unavailable: '無法取得',
   },
   en: {
@@ -478,6 +479,7 @@ const messages = {
     imageFormats: 'Images',
     documentFormats: 'Documents',
     codeFormats: 'Programming languages',
+    modelFormats: '3D Files',
     mediaFormats: 'Media & Subtitles',
     clearAll: 'Clear all',
     about: 'About',
@@ -498,11 +500,8 @@ const messages = {
     hardwareInfo: 'Hardware',
     osVersion: 'OS Version',
     appVersion: 'App Version',
-    buildInfo: 'Build Source',
     sourceCode: 'Source Code',
-    license: 'License',
     copySourceUrl: 'Copy GitHub URL',
-    noWarranty: 'This program is provided under the Source-Available, No-Commercial-Sales License without warranty. Complete license and third-party notices are included in the App Bundle under Resources/Licenses.',
     unavailable: 'Unavailable',
   },
   ja: {
@@ -686,6 +685,7 @@ const messages = {
     imageFormats: '画像ファイル',
     documentFormats: '文書ファイル',
     codeFormats: 'プログラミング言語',
+    modelFormats: '3D ファイル',
     mediaFormats: 'メディア・字幕',
     clearAll: 'すべて解除',
     about: '情報',
@@ -706,11 +706,8 @@ const messages = {
     hardwareInfo: 'ハードウェア',
     osVersion: 'OS バージョン',
     appVersion: 'APP バージョン',
-    buildInfo: 'ビルド情報',
     sourceCode: 'ソースコード',
-    license: 'ライセンス',
     copySourceUrl: 'GitHub URL をコピー',
-    noWarranty: '本プログラムはソース公開・商業販売禁止ライセンスに基づき、無保証で提供されます。完全なライセンスと第三者通知は App Bundle の Resources/Licenses に含まれます。',
     unavailable: '取得できません',
   },
 } satisfies Record<LocaleCode, Record<string, string>>;
@@ -768,6 +765,7 @@ const storageKeys = {
   enabledImageExtensions: 'fastfileviewer.enabledImageExtensions',
   enabledDocumentExtensions: 'fastfileviewer.enabledDocumentExtensions.v2',
   enabledCodeExtensions: 'fastfileviewer.enabledCodeExtensions.v1',
+  enabledModelExtensions: 'fastfileviewer.enabledModelExtensions.v1',
   enabledMediaExtensions: 'fastfileviewer.enabledMediaExtensions.v1',
   rootPath: 'fastfileviewer.rootPath',
   libraryCache: 'fastfileviewer.libraryCache.v3',
@@ -812,6 +810,7 @@ export default function App() {
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const [documentFormatsReady, setDocumentFormatsReady] = useState(false);
   const [codeFormatsReady, setCodeFormatsReady] = useState(false);
+  const [modelFormatsReady, setModelFormatsReady] = useState(false);
   const [mediaFormatsReady, setMediaFormatsReady] = useState(false);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => resolveInitialLanguagePreference());
   const [stageBackground, setStageBackground] = useState<StageBackground>(() => resolveInitialStageBackground());
@@ -820,6 +819,7 @@ export default function App() {
   const [enabledImageExtensions, setEnabledImageExtensions] = useState<string[]>(() => resolveInitialEnabledImageExtensions());
   const [enabledDocumentExtensions, setEnabledDocumentExtensions] = useState<string[]>(() => resolveInitialEnabledDocumentExtensions());
   const [enabledCodeExtensions, setEnabledCodeExtensions] = useState<string[]>(() => resolveInitialEnabledCodeExtensions());
+  const [enabledModelExtensions, setEnabledModelExtensions] = useState<string[]>(() => readStoredEnabledExtensions(storageKeys.enabledModelExtensions, fallbackBootstrap.supportedModels) ?? [...fallbackBootstrap.supportedModels]);
   const [enabledMediaExtensions, setEnabledMediaExtensions] = useState<string[]>(() => resolveInitialEnabledMediaExtensions());
   const locale = useMemo(() => resolveLocale(languagePreference), [languagePreference]);
   const [rootPath, setRootPath] = useState('');
@@ -1014,6 +1014,10 @@ export default function App() {
   }, [codeFormatsReady, enabledCodeExtensions]);
 
   useEffect(() => {
+    if (modelFormatsReady) localStorage.setItem(storageKeys.enabledModelExtensions, JSON.stringify(enabledModelExtensions));
+  }, [modelFormatsReady, enabledModelExtensions]);
+
+  useEffect(() => {
     if (!mediaFormatsReady) {
       return;
     }
@@ -1073,13 +1077,16 @@ export default function App() {
         if (disposed || !payload) {
           return;
         }
+        const supportedModels = payload.supportedModels?.length ? payload.supportedModels : fallbackBootstrap.supportedModels;
         const supportedMedia = payload.supportedMedia?.length ? payload.supportedMedia : fallbackBootstrap.supportedMedia;
         const supportedCode = payload.supportedCode?.length ? payload.supportedCode : fallbackBootstrap.supportedCode;
         const allDocumentExtensions = [...payload.supportedDocuments, ...supportedCode];
         const storedDocuments = readStoredEnabledExtensions(storageKeys.enabledDocumentExtensions, allDocumentExtensions);
         const storedCode = readStoredEnabledExtensions(storageKeys.enabledCodeExtensions, supportedCode);
         const storedMedia = readStoredEnabledExtensions(storageKeys.enabledMediaExtensions, supportedMedia);
-        setBootstrap({ ...payload, supportedCode, supportedMedia });
+        setBootstrap({ ...payload, supportedCode, supportedModels, supportedMedia });
+        setEnabledModelExtensions(readStoredEnabledExtensions(storageKeys.enabledModelExtensions, supportedModels) ?? [...supportedModels]);
+        setModelFormatsReady(true);
         setEnabledDocumentExtensions((storedDocuments ?? allDocumentExtensions).filter((extension) => payload.supportedDocuments.includes(extension)));
         setEnabledCodeExtensions(storedCode ?? storedDocuments?.filter((extension) => supportedCode.includes(extension)) ?? [...supportedCode]);
         setEnabledMediaExtensions(storedMedia ?? [...supportedMedia]);
@@ -1306,7 +1313,7 @@ export default function App() {
     setErrorMessage('');
     resetView();
 
-    if (selectedImageEntry && isPlaybackMediaKind(selectedImageEntry.kind)) {
+    if (selectedImageEntry && (selectedImageEntry.kind === 'model' || isPlaybackMediaKind(selectedImageEntry.kind))) {
       setImagePayload(null);
       setDocumentPayload(null);
       setPdfURL(null);
@@ -1622,7 +1629,7 @@ export default function App() {
       libraryResetRef.current = reset.catch(() => undefined);
       await reset;
       if (scanTokenRef.current !== token) return;
-      const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, [...enabledDocumentExtensions, ...enabledCodeExtensions], enabledMediaExtensions, operationId);
+      const firstResult = await window.go?.app?.App?.ScanDirectory?.(trimmedPath, enabledImageExtensions, [...enabledDocumentExtensions, ...enabledCodeExtensions], enabledModelExtensions, enabledMediaExtensions, operationId);
       if (!firstResult?.node || scanTokenRef.current !== token) {
         return;
       }
@@ -1669,7 +1676,7 @@ export default function App() {
         }
 
         try {
-          const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, [...enabledDocumentExtensions, ...enabledCodeExtensions], enabledMediaExtensions, operationId);
+          const result = await window.go?.app?.App?.ScanDirectory?.(nextPath, enabledImageExtensions, [...enabledDocumentExtensions, ...enabledCodeExtensions], enabledModelExtensions, enabledMediaExtensions, operationId);
           if (!result?.node || scanTokenRef.current !== token) {
             return;
           }
@@ -2300,6 +2307,7 @@ export default function App() {
   const totals = displayTree ? libraryCounts(displayTree) : null;
   const totalImages = totals?.images ?? 0;
   const totalDocuments = totals?.documents ?? 0;
+  const totalModels = totals?.models ?? 0;
   const totalMedia = totals?.media ?? 0;
   const totalArchives = totals?.archives ?? 0;
 
@@ -2397,7 +2405,7 @@ export default function App() {
             <div className="brand-copy">
               <div className="brand-title">{t.appName}</div>
               <div className="brand-subtitle">
-                {totalImages.toLocaleString()} {t.imageCount} · {totalDocuments.toLocaleString()} {t.documentCount} · {totalMedia.toLocaleString()} {t.mediaCount} · {totalArchives.toLocaleString()} {t.archiveCount}
+                {totalImages.toLocaleString()} {t.imageCount} · {totalDocuments.toLocaleString()} {t.documentCount} · {totalMedia.toLocaleString()} {t.mediaCount}{totalModels > 0 ? ` · ${totalModels.toLocaleString()} ${t.modelFormats}` : ''} · {totalArchives.toLocaleString()} {t.archiveCount}
               </div>
             </div>
           </div>
@@ -2710,14 +2718,14 @@ export default function App() {
 
         <section
           ref={imageStageRef}
-          className={`image-stage stage-bg-${stageBackground} ${viewerMode} ${fullscreen ? 'view-fullscreen' : ''} ${imagePayload ? 'has-image' : ''} ${documentPayload || pdfURL ? 'has-document' : ''} ${activeIsMedia ? 'has-media' : ''} ${panning ? 'panning' : ''}`}
+          className={`image-stage stage-bg-${stageBackground} ${viewerMode} ${fullscreen ? 'view-fullscreen' : ''} ${imagePayload ? 'has-image' : ''} ${documentPayload || pdfURL ? 'has-document' : ''} ${activeIsMedia ? 'has-media' : ''} ${activeImage?.kind === 'model' ? 'has-model' : ''} ${panning ? 'panning' : ''}`}
           onDoubleClick={handleStageDoubleClick}
           onPointerDown={activeIsImage ? handlePanStart : undefined}
           onPointerMove={activeIsImage ? handlePanMove : undefined}
           onPointerUp={activeIsImage ? handlePanEnd : undefined}
           onPointerCancel={activeIsImage ? handlePanEnd : undefined}
           onWheel={activeIsImage ? handleWheelNavigation : undefined}
-          onContextMenu={openViewerContextMenu}
+          onContextMenu={activeImage?.kind === 'model' ? undefined : openViewerContextMenu}
         >
           {persistentAudioEntry ? (
             <div className="persistent-audio-player" hidden={!persistentAudioVisible}>
@@ -2808,6 +2816,8 @@ export default function App() {
                 <CodeHighlight code={documentPayload.text} language={languageByFormat(documentPayload.format)} truncatedLabel={t.previewTruncated} />
               )}
             </article>
+          ) : activeImage?.kind === 'model' ? (
+            <ModelPreview key={activeImage.id} entry={activeImage} locale={locale} />
           ) : activeImage?.kind === 'video' ? (
             <MediaPlayer
               entry={activeImage}
@@ -2919,6 +2929,7 @@ export default function App() {
                   <option value="all">{t.allContent}</option>
                   <option value="image">{t.imagesOnly}</option>
                   <option value="document">{t.documentsOnly}</option>
+                  <option value="model">{t.modelFormats}</option>
                   <option value="media">{t.mediaOnly}</option>
                 </select>
                 <select value={workspaceSourceFilter} onChange={(event) => setWorkspaceSourceFilter(event.target.value as WorkspaceSourceFilter)}>
@@ -3042,7 +3053,7 @@ export default function App() {
                   ) : activeImage && activeImage.kind !== 'image' && documentPayload?.id === activeImage.id ? (
                     <pre>{limitDocumentPreview(documentPayload.text).text.slice(0, 4000)}</pre>
                   ) : (
-                    <FontAwesomeIcon icon={activeImage?.kind === 'image' ? faImage : faFileLines} />
+                    <FontAwesomeIcon icon={activeImage?.kind === 'image' ? faImage : activeImage?.kind === 'model' ? faCube : faFileLines} />
                   )}
                 </div>
                 {activeImage ? (
@@ -3067,7 +3078,7 @@ export default function App() {
                           setSelectedImageId(image.id);
                         }}
                       >
-                        <FontAwesomeIcon icon={image.source === 'archive' ? faBoxArchive : image.kind === 'image' ? faImage : faFileLines} />
+                        <FontAwesomeIcon icon={image.source === 'archive' ? faBoxArchive : image.kind === 'image' ? faImage : image.kind === 'model' ? faCube : faFileLines} />
                         <span>{image.name}</span>
                       </button>
                     ))}
@@ -3173,6 +3184,9 @@ export default function App() {
               </button>
               <button className={`settings-tab ${settingsTab === 'codeFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('codeFormats')}>
                 {t.codeFormats}
+              </button>
+              <button className={`settings-tab ${settingsTab === 'modelFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('modelFormats')}>
+                {t.modelFormats}
               </button>
               <button className={`settings-tab ${settingsTab === 'mediaFormats' ? 'active' : ''}`} type="button" onClick={() => setSettingsTab('mediaFormats')}>
                 {t.mediaFormats}
@@ -3281,6 +3295,24 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+              ) : settingsTab === 'modelFormats' ? (
+                <div className="settings-stack">
+                  <div className="settings-format-header">
+                    <span>{t.modelFormats}</span>
+                    <div className="settings-format-actions">
+                      <button className="settings-link-button" type="button" onClick={() => setEnabledModelExtensions([])}>{t.clearAll}</button>
+                      <button className="settings-link-button" type="button" onClick={() => setEnabledModelExtensions([...bootstrap.supportedModels])}>{t.selectAll}</button>
+                    </div>
+                  </div>
+                  <div className="format-grid">
+                    {bootstrap.supportedModels.map((extension) => (
+                      <label className="format-option" key={extension}>
+                        <input type="checkbox" checked={enabledModelExtensions.includes(extension)} onChange={() => setEnabledModelExtensions((current) => current.includes(extension) ? current.filter((value) => value !== extension) : [...current, extension])} />
+                        <span>{extension}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ) : settingsTab === 'mediaFormats' ? (
                 <div className="settings-stack">
                   <div className="settings-format-header">
@@ -3318,20 +3350,11 @@ export default function App() {
                     <strong>{appInfo.appVersion || t.unavailable}</strong>
                   </div>
                   <div className="about-row">
-                    <span>{t.buildInfo}</span>
-                    <strong>{`${appInfo.tag || 'untagged'} · ${(appInfo.commit || 'unknown').slice(0, 12)} · ${appInfo.buildState || 'unknown'}`}</strong>
-                  </div>
-                  <div className="about-row">
-                    <span>{t.license}</span>
-                    <strong>{appInfo.license || 'GNU General Public License v3.0'}</strong>
-                  </div>
-                  <div className="about-row">
                     <span>{t.sourceCode}</span>
                     <button className="settings-link-button about-source-button" type="button" title={appInfo.sourceUrl} onClick={() => copyText(appInfo.sourceUrl)}>
                       {t.copySourceUrl}
                     </button>
                   </div>
-                  <p className="about-license-notice">{t.noWarranty}</p>
                   <button className="about-update-button" type="button" disabled={appUpdates.busy} onClick={appUpdates.check}>
                     {appUpdates.state.phase === 'checking' ? updateMessages[locale].checking : updateMessages[locale].check}
                   </button>
@@ -3563,7 +3586,7 @@ function TreeNode({
                   onContextMenu={(event) => onOpenImageContextMenu(event, node, image)}
                   title={image.path}
                 >
-                  <FontAwesomeIcon icon={image.kind === 'image' ? faImage : faFileLines} />
+                  <FontAwesomeIcon icon={image.kind === 'image' ? faImage : image.kind === 'model' ? faCube : faFileLines} />
                   <span>{image.name}</span>
                 </button>
               </div>

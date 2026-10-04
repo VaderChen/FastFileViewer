@@ -31,7 +31,7 @@ type InstallProgress struct {
 	Version string `json:"version"`
 }
 
-// Installer runs in a detached copy of the old executable. Its small window stays
+// Installer runs in a detached copy of the signed app bundle. Its small window stays
 // alive while both application bundles are closed or replaced.
 type Installer struct {
 	mu    sync.Mutex

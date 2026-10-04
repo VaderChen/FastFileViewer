@@ -32,6 +32,10 @@ var (
 func NewMediaMiddleware(service *MediaService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			if strings.HasPrefix(request.URL.Path, modelURLPrefix) {
+				service.serveModel(response, request)
+				return
+			}
 			if strings.HasPrefix(request.URL.Path, imageURLPrefix) {
 				service.serveImage(response, request)
 				return

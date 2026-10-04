@@ -43,11 +43,11 @@ test('immutable tree updates refresh counts and visibility without retaining sta
   const child = { ...node('archive', [entry('text', 'markdown'), entry('audio', 'audio')]), kind: 'archive' as const };
   const root = node('root', [entry('image')], [child]);
   const previous = libraryCounts(root);
-  assert.deepEqual(previous, { entries: 3, images: 1, documents: 1, media: 1, archives: 1 });
+  assert.deepEqual(previous, { entries: 3, images: 1, documents: 1, media: 1, models: 0, archives: 1 });
   assert.strictEqual(libraryCounts(root), previous);
   const changed = { ...root, images: [entry('pdf', 'pdf')], children: [{ ...child, images: [] }] };
   const visible = buildVisibleTree(changed)!;
-  assert.deepEqual(libraryCounts(visible), { entries: 1, images: 0, documents: 1, media: 0, archives: 0 });
+  assert.deepEqual(libraryCounts(visible), { entries: 1, images: 0, documents: 1, media: 0, models: 0, archives: 0 });
   assert.deepEqual(libraryCounts(root), previous);
   for (const kind of ['video', 'subtitle', 'code', 'text'] as const) {
     const counts = libraryCounts(node(kind, [entry(kind, kind)]));

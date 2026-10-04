@@ -45,7 +45,7 @@ export function ResetLibrary():Promise<void>;
 
 export function SaveLibraryCache(arg1:string,arg2:string):Promise<void>;
 
-export function ScanDirectory(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:number):Promise<app.DirectoryScanResult>;
+export function ScanDirectory(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:Array<string>,arg6:number):Promise<app.DirectoryScanResult>;
 
 export function SelectDirectory(arg1:string):Promise<string>;
 

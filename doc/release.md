@@ -87,4 +87,8 @@ App 從 GitHub `releases/latest` 讀取正式發行資訊，忽略草稿與預�
 
 更新器在可寫入的安裝目錄旁建立私人暫存目錄，驗證及準備完成後啟動獨立進度視窗，再關閉主程式。新版 React 畫面回報啟動成功後才清除原版；替換或重啟失敗時嘗試還原並重新開啟原版。若還原也失敗，暫存目錄中的 `previous.app` 會保留供復原。下載失敗、取消與驗證失敗均不替換已安裝 App。更新不使用 GitHub token，也不改變既有認證方式。
 
-發行前可將 `FASTFILEVIEWER_UPDATE_TEST_APP` 指向已簽章、公證的 App，執行 `go test ./internal/updater -run TestSignedReleaseFixture -v`，確認實際簽章、Gatekeeper、版本及系統相容性。此測試只讀取指定 App，不會替換安裝內容。
+更新助手使用原 App 的完整簽章 Bundle 副本，包含 Info.plist、資源與簽章；單獨複製主執行檔會使 macOS 無法驗證並啟動助手。
+
+發行前可將 `FASTFILEVIEWER_UPDATE_TEST_APP` 指向已簽章、公證的 App，執行 `go test ./internal/updater -run "TestSigned(Release|InstallerLaunch)Fixture" -v`。除了簽章、Gatekeeper、版本及系統相容性，也必須確認助手能實際啟動 WebKit 進度視窗並回報就緒。助手測試會使用暫存 App 副本，在原程式等待階段結束助手；指定的安裝內容不會被替換。
+
+若使用者的舊版在更新準備階段約 65% 失敗，Release Notes 須提供 DMG 手動更新一次的方式。更新助手的修正隨新版 App 提供，無法回溯修改已安裝舊版的更新程式。

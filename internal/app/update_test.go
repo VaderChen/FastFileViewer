@@ -151,6 +151,24 @@ func TestUpdateFailuresKeepAppRunning(t *testing.T) {
 	}
 }
 
+func TestUpdateInstallerFailureCleansUpAndKeepsAppRunning(t *testing.T) {
+	u := testUpdateService(t)
+	var cleaned, quit atomic.Bool
+	u.prepare = func(context.Context, *updater.Client, updater.Release, string, func(string, int64)) (string, func(), error) {
+		return "staging", func() { cleaned.Store(true) }, nil
+	}
+	u.launch = func(context.Context, string) error { return errors.New("restart") }
+	u.quit = func() { quit.Store(true) }
+	u.CheckForUpdates()
+	waitUpdatePhase(t, u, "available")
+	u.InstallUpdate("en")
+	state := waitUpdatePhase(t, u, "error")
+	u.wg.Wait()
+	if state.Error != "restart" || !cleaned.Load() || quit.Load() {
+		t.Fatalf("installer startup failure mishandled: %+v", state)
+	}
+}
+
 func TestUpdateShutdownCancelsCheckAndRejectsNewWork(t *testing.T) {
 	u := testUpdateService(t)
 	started := make(chan struct{})

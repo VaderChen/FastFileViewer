@@ -31,6 +31,7 @@ export namespace app {
 	    supportedImages: string[];
 	    supportedDocuments: string[];
 	    supportedCode: string[];
+	    supportedModels: string[];
 	    supportedMedia: string[];
 	    supportedPacks: string[];
 	
@@ -44,6 +45,7 @@ export namespace app {
 	        this.supportedImages = source["supportedImages"];
 	        this.supportedDocuments = source["supportedDocuments"];
 	        this.supportedCode = source["supportedCode"];
+	        this.supportedModels = source["supportedModels"];
 	        this.supportedMedia = source["supportedMedia"];
 	        this.supportedPacks = source["supportedPacks"];
 	    }

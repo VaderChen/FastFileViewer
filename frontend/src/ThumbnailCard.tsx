@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBoxArchive, faCheck, faFileLines, faFolder, faImage, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faBoxArchive, faCheck, faCube, faFileLines, faFolder, faImage, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import type { ImageEntry } from './types';
 import { formatBytes } from './format';
 import { observeThumbnailVisibility, readThumbnail, requestThumbnail } from './thumbnailCache';
@@ -77,7 +77,7 @@ export function ThumbnailCard({ image, revision = 0, active, selected, archiveLa
       <button className="thumbnail-preview" type="button" onClick={onOpen}>
         {image.kind !== 'image' ? (
           <div className={`document-thumbnail ${image.kind}`}>
-            <FontAwesomeIcon icon={faFileLines} />
+            <FontAwesomeIcon icon={image.kind === 'model' ? faCube : faFileLines} />
             <strong>{image.format.replace('.', '').toUpperCase()}</strong>
           </div>
         ) : thumbnailStatus === 'ready' && thumbnail ? <img src={thumbnail} alt="" draggable={false} loading="lazy" />

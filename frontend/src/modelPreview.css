@@ -1,0 +1,112 @@
+.image-stage.has-model {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow: hidden;
+  padding: 0;
+}
+
+.model-preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.model-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  color: #27362f;
+  background: #f7faf8;
+  border-bottom: 1px solid #cbd3cd;
+}
+
+.model-toolbar strong,
+.model-toolbar button {
+  flex: 0 0 auto;
+}
+
+.model-toolbar button,
+.model-status button {
+  padding: 6px 12px;
+  border: 1px solid #cbd3cd;
+  border-radius: 6px;
+  color: #27362f;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.model-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.model-toolbar button:not(:disabled):hover,
+.model-status button:hover {
+  background: #edf4ef;
+}
+
+.model-toolbar span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.model-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.model-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.model-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: #27362f;
+  background: #f7faf8;
+}
+
+.model-status progress {
+  width: min(280px, 80%);
+  accent-color: #247861;
+}
+
+.model-controls,
+.model-warning {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  font-size: 12px;
+  color: #526158;
+  background: #f7faf8;
+}
+
+.model-warning {
+  color: #795321;
+  background: #fff5df;
+}

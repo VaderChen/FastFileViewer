@@ -1325,17 +1325,6 @@ body.resizing-library {
   justify-self: start;
 }
 
-.about-license-notice {
-  margin: 8px 0 0;
-  padding: 12px;
-  color: #58645d;
-  border: 1px solid #d8e0da;
-  border-radius: 7px;
-  background: #f7f9f7;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
 .context-menu {
   position: fixed;
   z-index: 1400;

@@ -12,12 +12,16 @@
 
 ## 最新版本
 
-[1.26.1004 build 0026](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0026) 修正底部檔案資訊被裁切的問題。資訊列會依內容自動調整高度，窄視窗會換行，讓圖片 EXIF、影音資訊及 SHA-256 控制項保持可見。支援 Apple Silicon、macOS 12 以上；可透過關於頁面的「偵測更新」取得新版。
+[1.26.1004 build 0945](https://github.com/VaderChen/FastFileViewer/releases/tag/1.26.1004-build-0945) 新增 GLB／glTF、OBJ、STL、PLY、FBX、3MF 的互動式 3D 預覽，並降低模型載入記憶體、重複材質檢查與繪圖配置成本。另修正更新助手啟動及 ExFAT 開發簽章問題，調整關於頁面。支援 Apple Silicon、macOS 12 以上；若舊版更新停在約 65%，請下載本版 DMG 手動更新一次。
 
-變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-1.26.1004-build-0026.md)、[函式檢查報告](doc/function-optimization-followup.md) 與[效能基準及量測限制](doc/performance.md)。
+變更詳見 [Changelog](CHANGELOG.md)、[版本說明](doc/release-1.26.1004-build-0945.md)、[函式檢查報告](doc/function-optimization-followup.md) 與[效能基準及量測限制](doc/performance.md)。
 
 ## 功能
 
+- 新增「3D 檔案」設定頁（位於「媒體與字幕」之前），可選擇 GLB、glTF、OBJ、STL、PLY、FBX、3MF 格式；模型可從一般目錄或 ZIP／TAR／TGZ／TAR.GZ 載入並渲染。
+- 3D 預覽支援左鍵拖曳旋轉、右鍵或 Shift＋左鍵平移、滾輪縮放與「重設視角」。OBJ 可讀取 MTL 材質，glTF／OBJ 的貼圖與二進位資源須放在模型所在目錄或子目錄；缺少貼圖時會提示並盡可能顯示模型。
+- 3D 目前提供靜態模型預覽；glTF 2.0 支援一般與 Meshopt 資料，尚不支援 Draco／KTX2、動畫播放、STEP／IGES 或原生 Blender 專案。單一模型／資源上限 128 MiB，複雜模型另受幾何與貼圖預覽預算限制。
+- 3D 格式解析器按需載入；靜態場景避免重算世界矩陣，視窗尺寸不變時不重建繪圖緩衝區，切換或取消模型時立即回收預覽資源。
 - 逐目錄掃描本機資料夾，建立圖片、文件、程式碼、影音與字幕的統一內容樹。
 - 從 Finder 或 macOS `open` 開啟檔案時，會先顯示指定檔案，再於背景完成所在目錄索引。
 - 不解壓縮直接瀏覽 ZIP、TAR、TGZ 與 TAR.GZ 內的支援內容。
@@ -42,7 +46,7 @@
 - 在「下載項目」貼上或拖入公開 HTTP/HTTPS 網址，自動下載圖片、影片、文章與一般檔案；可直接存取的影片頁會解析 HTML／內嵌腳本中的 `.m3u8`。
 - 影片頁只有一個 `.m3u8` 時自動下載；找到多個時顯示複選對話框，每個選項建立獨立下載項目。
 - 支援未加密、已結束的 `.m3u8` VOD；主播放清單會選擇最高頻寬版本並合併媒體片段。
-- 可分別設定要掃描的圖片、文件、程式語言與影音／字幕格式。
+- 可分別設定要掃描的圖片、文件、程式語言、3D 檔案與影音／字幕格式。
 - 三區式內容工作區、持久化釘選目錄、批次載入及可取消作業。
 - 跨資料夾與壓縮檔多選匯出、SHA-256 檢查及完全重複檔案偵測。
 - 目錄索引、縮圖及相鄰圖片快取均保存在本機，不需網路服務。
@@ -75,7 +79,7 @@ cd FastFileViewer
 ./run.sh
 ```
 
-`run.sh` 會直接在專案目錄啟動 Wails，前端依賴安裝於 `frontend/node_modules`，指定版本的 Wails CLI 安裝於 `build/tools`。
+`run.sh` 會直接在專案目錄啟動 Wails，前端依賴安裝於 `frontend/node_modules`，指定版本的 Wails CLI 安裝於 `build/tools`。開發與建置共用簽章相容修正：在 App 封裝完成後、簽章前清除 Bundle 內的 AppleDouble 中繼檔，避免 ExFAT 磁碟上的 `._` 檔案造成簽章失敗。
 
 ## 建置 macOS App
 

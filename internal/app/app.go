@@ -164,6 +164,8 @@ var supportedCodeExtensions = []string{
 	".gradle",
 }
 
+var supportedModelExtensions = []string{".glb", ".gltf", ".obj", ".stl", ".ply", ".fbx", ".3mf"}
+
 var supportedMediaExtensions = []string{
 	".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".m2ts",
 	".mp3", ".mp2", ".m4a", ".m4b", ".wav", ".aac", ".flac", ".ogg", ".oga", ".opus",
@@ -291,6 +293,7 @@ func (a *App) Bootstrap() BootstrapPayload {
 		SupportedImages:    append([]string{}, supportedImageExtensions...),
 		SupportedDocuments: append([]string{}, supportedDocumentExtensions...),
 		SupportedCode:      append([]string{}, supportedCodeExtensions...),
+		SupportedModels:    append([]string{}, supportedModelExtensions...),
 		SupportedMedia:     append([]string{}, supportedMediaExtensions...),
 		SupportedPacks:     append([]string{}, supportedArchiveExtensions...),
 	}
@@ -628,7 +631,7 @@ func (a *App) ResetLibrary() {
 	a.entries.reset()
 }
 
-func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []string, enabledDocumentExtensions []string, enabledMediaExtensions []string, operationID int64) (DirectoryScanResult, error) {
+func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []string, enabledDocumentExtensions []string, enabledModelExtensions []string, enabledMediaExtensions []string, operationID int64) (DirectoryScanResult, error) {
 	operationCtx := a.operationContext(operationID)
 	if err := checkOperation(operationCtx); err != nil {
 		return DirectoryScanResult{}, err
@@ -640,6 +643,10 @@ func (a *App) ScanDirectory(directoryPath string, enabledImageExtensions []strin
 	imageExtensionFilter := newExtensionFilter(enabledImageExtensions, supportedImageExtensions)
 	allDocumentExtensions := append(append([]string{}, supportedDocumentExtensions...), supportedCodeExtensions...)
 	documentExtensionFilter := newExtensionFilter(enabledDocumentExtensions, allDocumentExtensions)
+	// Archive scanners share this content filter; model settings remain independent.
+	for extension := range newExtensionFilter(enabledModelExtensions, supportedModelExtensions) {
+		documentExtensionFilter[extension] = true
+	}
 	mediaExtensionFilter := newExtensionFilter(enabledMediaExtensions, supportedMediaExtensions)
 
 	absPath, err := filepath.Abs(directoryPath)
@@ -1611,6 +1618,9 @@ func splitArchiveEntryPath(imagePath string) (string, string, bool) {
 }
 
 func entryKind(extension string) string {
+	if isSupportedModel(extension) {
+		return "model"
+	}
 	if extension == ".pdf" {
 		return "pdf"
 	}
@@ -1664,7 +1674,11 @@ func isSupportedDocument(extension string) bool {
 }
 
 func isSupportedEntry(extension string) bool {
-	return isSupportedImage(extension) || isSupportedDocument(extension) || isSupportedMedia(extension)
+	return isSupportedImage(extension) || isSupportedDocument(extension) || isSupportedMedia(extension) || isSupportedModel(extension)
+}
+
+func isSupportedModel(extension string) bool {
+	return containsExtension(supportedModelExtensions, extension)
 }
 
 func isSupportedMedia(extension string) bool {

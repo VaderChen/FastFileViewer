@@ -287,7 +287,7 @@ func TestScanReportsCorruptArchive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "broken.tgz"), []byte("not gzip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestScanFindsMediaAndSubtitleEntries(t *testing.T) {
 		}
 	}
 
-	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestMediaExtensionSelectionControlsScan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := New().Library.ScanDirectory(directory, nil, nil, []string{}, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, []string{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestScanFindsMediaInsideArchive(t *testing.T) {
 	directory := t.TempDir()
 	writeZipEntry(t, filepath.Join(directory, "media.zip"), "clip.mp4", []byte("placeholder"))
 
-	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, 0)
+	result, err := New().Library.ScanDirectory(directory, nil, nil, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +499,7 @@ func TestCancelledOperationStopsScan(t *testing.T) {
 	application := New().Library
 	operationID := application.BeginOperation()
 	application.CancelOperation(operationID)
-	_, err := application.ScanDirectory(t.TempDir(), nil, nil, nil, operationID)
+	_, err := application.ScanDirectory(t.TempDir(), nil, nil, nil, nil, operationID)
 	if !errors.Is(err, errOperationCancelled) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}

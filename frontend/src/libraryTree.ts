@@ -124,7 +124,7 @@ export function isLibraryTree(value: unknown): value is LibraryNode {
   const pending: { value: unknown; depth: number }[] = [{ value, depth: 0 }];
   const nodeIds = new Set<string>();
   const imageIds = new Set<string>();
-  const entryKinds = new Set(['image', 'text', 'markdown', 'code', 'pdf', 'video', 'audio', 'subtitle']);
+  const entryKinds = new Set(['image', 'text', 'markdown', 'code', 'pdf', 'video', 'audio', 'subtitle', 'model']);
   const record = (item: unknown): item is Record<string, unknown> =>
     item !== null && typeof item === 'object' && !Array.isArray(item);
   const nonEmptyString = (item: unknown): item is string => typeof item === 'string' && item.length > 0;

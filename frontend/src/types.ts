@@ -1,6 +1,6 @@
 export type NodeKind = 'directory' | 'archive';
 export type ImageSource = 'file' | 'archive';
-export type EntryKind = 'image' | 'text' | 'markdown' | 'code' | 'pdf' | 'video' | 'audio' | 'subtitle';
+export type EntryKind = 'image' | 'text' | 'markdown' | 'code' | 'pdf' | 'video' | 'audio' | 'subtitle' | 'model';
 export type MediaEntryKind = 'video' | 'audio' | 'subtitle';
 export type ViewerMode = 'fit' | 'actual';
 export type ZoomBehavior = 'fitArea' | 'shrinkLarge' | 'lockRatio';
@@ -8,13 +8,14 @@ export type LocaleCode = 'zh-TW' | 'en' | 'ja';
 export type LanguagePreference = 'auto' | LocaleCode;
 export type StageBackground = 'lightGray' | 'white' | 'darkGray' | 'black' | 'checker';
 export type DocumentTheme = 'github-dark' | 'github-light' | 'atom-one-dark' | 'nord' | 'monokai';
-export type SettingsTab = 'display' | 'imageFormats' | 'documentFormats' | 'codeFormats' | 'mediaFormats' | 'about';
+export type SettingsTab = 'display' | 'imageFormats' | 'documentFormats' | 'codeFormats' | 'modelFormats' | 'mediaFormats' | 'about';
 
 export interface BootstrapPayload {
   defaultPath: string;
   supportedImages: string[];
   supportedDocuments: string[];
   supportedCode: string[];
+  supportedModels: string[];
   supportedMedia: string[];
   supportedPacks: string[];
 }

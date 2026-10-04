@@ -76,7 +76,7 @@ func TestDirectoryScanFilteringParity(t *testing.T) {
 	application := New()
 	defer application.Shutdown()
 	for _, filter := range [][]string{nil, {}, {".png"}} {
-		got, err := application.Library.ScanDirectory(root, filter, nil, nil, 0)
+		got, err := application.Library.ScanDirectory(root, filter, nil, nil, nil, 0)
 		want, wantErr := application.Library.referenceScanDirectory(root, filter, nil, nil, 0)
 		if fmt.Sprint(err) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want) {
 			t.Fatalf("scan changed for filter %v", filter)
@@ -84,7 +84,7 @@ func TestDirectoryScanFilteringParity(t *testing.T) {
 	}
 	id := application.Library.BeginOperation()
 	application.Library.CancelOperation(id)
-	got, err := application.Library.ScanDirectory(root, nil, nil, nil, id)
+	got, err := application.Library.ScanDirectory(root, nil, nil, nil, nil, id)
 	want, wantErr := application.Library.referenceScanDirectory(root, nil, nil, nil, id)
 	if fmt.Sprint(err) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want) {
 		t.Fatal("cancelled scan changed")
@@ -160,7 +160,9 @@ func BenchmarkFunctionDirectoryScan(b *testing.B) {
 		name string
 		scan func(string, []string, []string, []string, int64) (DirectoryScanResult, error)
 	}{
-		{"before", application.Library.referenceScanDirectory}, {"after", application.Library.ScanDirectory},
+		{"before", application.Library.referenceScanDirectory}, {"after", func(root string, images, documents, media []string, id int64) (DirectoryScanResult, error) {
+			return application.Library.ScanDirectory(root, images, documents, nil, media, id)
+		}},
 	} {
 		b.Run(method.name, func(b *testing.B) {
 			b.ReportAllocs()

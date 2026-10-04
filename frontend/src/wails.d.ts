@@ -20,7 +20,7 @@ declare global {
           SaveLibraryCache: (rootPath: string, payload: string) => Promise<void>;
           SelectDirectory: (dialogTitle: string) => Promise<string>;
           ResetLibrary: () => Promise<void>;
-          ScanDirectory: (directoryPath: string, enabledImageExtensions: string[], enabledDocumentExtensions: string[], enabledMediaExtensions: string[], operationId: number) => Promise<DirectoryScanResult>;
+          ScanDirectory: (directoryPath: string, enabledImageExtensions: string[], enabledDocumentExtensions: string[], enabledModelExtensions: string[], enabledMediaExtensions: string[], operationId: number) => Promise<DirectoryScanResult>;
           LoadImage: (id: string) => Promise<ImagePayload>;
           LoadImageByPath: (filePath: string) => Promise<ImagePayload>;
           LoadImageByPathWithOperation: (filePath: string, operationId: number) => Promise<ImagePayload>;
@@ -33,6 +33,7 @@ declare global {
         };
         // MediaService 負責播放前的解壓、改封裝與播放快取。
         MediaService?: {
+          PrepareModelByPath: (filePath: string) => Promise<string>;
           GetMediaMetadata: (entry: ImageEntry) => Promise<MediaMetadata>;
           PrepareMediaByPath: (filePath: string, operationId: number) => Promise<string>;
           PrepareCompatibleMediaByPath: (filePath: string, operationId: number) => Promise<string>;

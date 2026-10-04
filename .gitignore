@@ -47,6 +47,7 @@ service-account*.json
 /build/mediaicon.png
 /build/archiveicon.png
 /build/bin/
+/build/darwin/Info.dev.plist
 /build/tools/
 /dist/
 /frontend/dist/

@@ -11,6 +11,8 @@ export function PrepareDocumentByPath(arg1:string,arg2:number):Promise<string>;
 
 export function PrepareMediaByPath(arg1:string,arg2:number):Promise<string>;
 
+export function PrepareModelByPath(arg1:string):Promise<string>;
+
 export function ReleasePlaybackCache(arg1:string):Promise<void>;
 
 export function ReplaceRemuxedOriginal(arg1:string):Promise<app.ImageEntry>;
